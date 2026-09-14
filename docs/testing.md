@@ -13,10 +13,11 @@ All tests live under `tests/`, mirroring the package structure:
 ```
 tests/
 ├─ fixtures/         # small, synthetic .docx fixtures — never real personal documents
+├─ integration/      # cross-tool tests (from Phase 2) — see §3 below
 └─ ...                # mirrors src/docx_mcp/, populated from Phase 1 onward
 ```
 
-As of Phase 0, only `tests/` and `tests/fixtures/` existed, as empty folders. Phase 1 added `tests/fixtures/minimal.docx` (headings, a footnote, plain paragraphs) and the tests that read it; fixtures are extended per later phase as new tools need them — a table and multi-level headings in Phase 2, multiple footnotes including two anchored in the same paragraph in Phase 3, text split across runs in Phase 4, and so on (see [Roadmap.md](../Roadmap.md)).
+As of Phase 0, only `tests/` and `tests/fixtures/` existed, as empty folders. Phase 1 added `tests/fixtures/minimal.docx` (headings, a footnote, plain paragraphs) and the tests that read it. Phase 2 added `tests/fixtures/structured.docx` (a table with a merged cell, three heading levels including one custom-named style, deterministic core properties) and `tests/integration/`; fixtures are extended per later phase as new tools need them — multiple footnotes including two anchored in the same paragraph in Phase 3, text split across runs in Phase 4, and so on (see [Roadmap.md](../Roadmap.md)).
 
 ---
 
@@ -46,6 +47,8 @@ This category has no equivalent in a plain text-processing tool and is docx-mcp'
 ## 3. Integration tests (cross-tool)
 
 For chains where tools build on each other — e.g. `insert_paragraph` followed by `read_document` must show the new paragraph, or `add_footnote` followed by `get_footnotes` must resolve it consistently (see [Roadmap.md](../Roadmap.md), Phase 3 and Phase 6) — integration tests are added under `tests/integration/`.
+
+The same folder also holds tests for tools that expose the *same* underlying data two independently-computed ways without one calling the other, where staying consistent (or, where a spec deliberately allows divergence, staying divergent in exactly the documented place) is itself part of the contract: `tests/integration/test_read_document_and_get_structure_consistency.py` (Phase 2) checks that `read_document`'s inline markers and `get_structure`'s `heading_level`/`footnotes` agree everywhere the specs promise, and pins the one documented exception (custom-named heading styles, see [specs/read_document.md §5](../src/docx_mcp/specs/read_document.md#5-limitations-non-goals)) so it stays an intentional, tested contract rather than something either tool's implementation could silently drift into or out of.
 
 ---
 

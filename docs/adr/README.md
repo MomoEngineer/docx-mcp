@@ -42,9 +42,10 @@ An ADR is created for, among others:
 | --- | --- | --- |
 | [0001](0001-ooxml-library-and-module-layout.md) | OOXML Handling Library and Module Layout | Accepted |
 | [0002](0002-dependency-and-lockfile-strategy.md) | Dependency and Lockfile Strategy | Accepted |
+| [0003](0003-phase-2-module-layout.md) | Phase 2 Module Layout: Splitting `document.py` | Accepted |
 
 ---
 
 ## 5. Open/planned ADRs
 
-- None currently open. The two ADRs required by Phase 1 (OOXML library, dependency/lockfile strategy) are decided above.
+- None currently open. The three ADRs required so far (OOXML library, dependency/lockfile strategy, Phase 2 module layout) are decided above.

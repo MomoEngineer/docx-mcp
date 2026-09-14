@@ -41,6 +41,14 @@ def minimal_docx(allowed_root: Path) -> Path:
 
 
 @pytest.fixture
+def structured_docx(allowed_root: Path) -> Path:
+    """A private copy of `tests/fixtures/structured.docx`, inside `allowed_root`."""
+    destination = allowed_root / "structured.docx"
+    shutil.copyfile(FIXTURES_DIR / "structured.docx", destination)
+    return destination
+
+
+@pytest.fixture
 def outside_root(tmp_path: Path) -> Path:
     """A directory that is deliberately *not* an allowed root."""
     outside = tmp_path / "outside"

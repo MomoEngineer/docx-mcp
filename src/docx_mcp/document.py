@@ -1,23 +1,50 @@
-"""OOXML text extraction for `read_document`.
+"""WordprocessingML paragraph rendering: `extract_text` for `read_document`.
 
-Opens a `.docx` as a ZIP archive and parses `word/document.xml` with a
-hardened `lxml` parser (see [ADR-0001](../../docs/adr/0001-ooxml-library-and-module-layout.md)
-and [docs/security-model.md §4](../../docs/security-model.md#4-input-validation)),
+Opens a `.docx` as a ZIP archive (via `docx_mcp.ooxml`) and parses
+`word/document.xml` with a hardened `lxml` parser (see
+[ADR-0001](../../docs/adr/0001-ooxml-library-and-module-layout.md) and
+[docs/security-model.md §4](../../docs/security-model.md#4-input-validation)),
 rendering the body as one line of text per paragraph with Markdown-style
 heading markers and inline footnote-anchor markers. See
 [specs/read_document.md](specs/read_document.md) for the exact output format
 and documented limitations.
+
+This is also the one place `w:p`/`w:t`/`w:tab`/`w:footnoteReference`
+traversal happens: `paragraph_plain_text` (the marker-free half of
+`_render_paragraph`'s logic) and `paragraph_style_id` are reused by
+`docx_mcp.structure` and `docx_mcp.metadata` rather than re-implemented, per
+[ADR-0003](../../docs/adr/0003-phase-2-module-layout.md).
 """
 
 from __future__ import annotations
 
-import zipfile
 from pathlib import Path
 
 from lxml import etree
 
+from docx_mcp.ooxml import (
+    MAX_DOCX_SIZE_BYTES,
+    InvalidDocumentError,
+    parse_xml,
+    read_part,
+    validate_and_open,
+)
+
+__all__ = [
+    "MAX_DOCX_SIZE_BYTES",
+    "InvalidDocumentError",
+    "NSMAP",
+    "WORD_NS",
+    "extract_text",
+    "get_body",
+    "heading_level_from_style_prefix",
+    "paragraph_plain_text",
+    "paragraph_style_id",
+    "render_paragraph",
+]
+
 WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-_NSMAP = {"w": WORD_NS}
+NSMAP = {"w": WORD_NS}
 
 _W_T = f"{{{WORD_NS}}}t"
 _W_TAB = f"{{{WORD_NS}}}tab"
@@ -25,40 +52,20 @@ _W_FOOTNOTE_REFERENCE = f"{{{WORD_NS}}}footnoteReference"
 _W_ID = f"{{{WORD_NS}}}id"
 _W_VAL = f"{{{WORD_NS}}}val"
 
-MAX_DOCX_SIZE_BYTES = 50 * 1024 * 1024
 _HEADING_STYLE_PREFIX = "Heading"
-_DOCUMENT_PART = "word/document.xml"
+DOCUMENT_PART = "word/document.xml"
 
 
-class InvalidDocumentError(Exception):
-    """Raised when a file is not a readable, valid `.docx` document."""
+def heading_level_from_style_prefix(style_id: str | None) -> int | None:
+    """Return the heading level implied by a `pStyle` id's `HeadingN` prefix, or `None`.
 
-
-def _hardened_parser() -> etree.XMLParser:
-    """Build an `lxml` parser that never resolves entities or touches the network.
-
-    `resolve_entities=False` and `load_dtd=False` together mean a crafted
-    external entity (XXE) in a `.docx`'s XML is never substituted and never
-    read; `no_network=True` blocks any network-based entity/DTD fetch as
-    defense in depth; `huge_tree=False` (the default) keeps libxml2's built-in
-    entity-expansion ("billion laughs") limits active. See
-    [ADR-0001](../../docs/adr/0001-ooxml-library-and-module-layout.md).
-    """
-    return etree.XMLParser(
-        resolve_entities=False,
-        no_network=True,
-        huge_tree=False,
-        dtd_validation=False,
-        load_dtd=False,
-    )
-
-
-def _heading_level(style_id: str | None) -> int | None:
-    """Return the heading level for a `pStyle` id, or `None` if it isn't a heading.
-
-    Only recognizes Word's built-in heading style ids (`Heading1`..`Heading9`);
-    see the "Heading detection" limitation in
-    [specs/read_document.md](specs/read_document.md#5-limitations-non-goals).
+    Only recognizes Word's built-in heading style ids (`Heading1`..`Heading9`)
+    by their id text; this is the Phase 1 heuristic, kept as `get_structure`'s
+    last-resort fallback (see
+    [specs/get_structure.md §3](specs/get_structure.md#3-output-schema), step 3)
+    and as `read_document`'s only heading detection (see the "Heading
+    detection" limitation in
+    [specs/read_document.md](specs/read_document.md#5-limitations-non-goals)).
     """
     if not style_id or not style_id.startswith(_HEADING_STYLE_PREFIX):
         return None
@@ -66,24 +73,25 @@ def _heading_level(style_id: str | None) -> int | None:
     return int(suffix) if suffix.isdigit() else None
 
 
-def _paragraph_style_id(paragraph: etree._Element) -> str | None:
-    style = paragraph.find("w:pPr/w:pStyle", namespaces=_NSMAP)
+def paragraph_style_id(paragraph: etree._Element) -> str | None:
+    """Return a paragraph's raw `w:pPr/w:pStyle/@w:val`, or `None` if it has none."""
+    style = paragraph.find("w:pPr/w:pStyle", namespaces=NSMAP)
     if style is None:
         return None
     value = style.get(_W_VAL)
     return str(value) if value is not None else None
 
 
-def _render_paragraph(paragraph: etree._Element) -> str:
-    """Render one `w:p` element as a single line of text with inline markers.
+def _paragraph_text(paragraph: etree._Element, *, include_footnote_markers: bool) -> str:
+    """Walk every descendant in document order, collecting visible text and,
+    if requested, inline footnote-anchor markers - the shared traversal behind
+    both `paragraph_plain_text` and `_render_paragraph`.
 
-    Walks every descendant in document order and collects only the nodes that
-    carry visible text or an anchor marker: `w:t` (plain text; deliberately
-    excludes `w:delText`, so tracked-change deletions are never included, while
-    tracked-change insertions - ordinary `w:t` inside `w:ins` - are), `w:tab`
-    (rendered as a literal tab), and `w:footnoteReference` (rendered as
-    `[^N]` at its exact position). See
-    [specs/read_document.md §3](specs/read_document.md#3-output-schema).
+    Collects `w:t` (plain text; deliberately excludes `w:delText`, so
+    tracked-change deletions are never included, while tracked-change
+    insertions - ordinary `w:t` inside `w:ins` - are), `w:tab` (rendered as a
+    literal tab), and, when `include_footnote_markers` is true,
+    `w:footnoteReference` (rendered as `[^N]` at its exact position).
     """
     parts: list[str] = []
     for node in paragraph.iter():
@@ -92,23 +100,48 @@ def _render_paragraph(paragraph: etree._Element) -> str:
             parts.append(node.text or "")
         elif tag == _W_TAB:
             parts.append("\t")
-        elif tag == _W_FOOTNOTE_REFERENCE:
+        elif tag == _W_FOOTNOTE_REFERENCE and include_footnote_markers:
             footnote_id = node.get(_W_ID)
             parts.append(f"[^{footnote_id}]")
+    return "".join(parts)
 
-    text = "".join(parts)
-    level = _heading_level(_paragraph_style_id(paragraph))
+
+def paragraph_plain_text(paragraph: etree._Element) -> str:
+    """A paragraph's text with no heading `'# '` prefix and no inline `'[^N]'`
+    footnote marker - those are `read_document`'s own rendering convention,
+    not structural data. Shared by `docx_mcp.structure` (paragraph/table-cell
+    text) and `docx_mcp.metadata` (word count), per
+    [ADR-0003](../../docs/adr/0003-phase-2-module-layout.md).
+    """
+    return _paragraph_text(paragraph, include_footnote_markers=False)
+
+
+def render_paragraph(paragraph: etree._Element) -> str:
+    """Render one `w:p` element as a single line of text with inline markers.
+
+    See [specs/read_document.md §3](specs/read_document.md#3-output-schema).
+    Reused by `docx_mcp.structure` for table-cell text, which - per
+    [specs/get_structure.md §3](specs/get_structure.md#3-output-schema) - uses
+    this same marker-inclusive rendering, since a cell can validly contain a
+    heading-styled or footnote-anchored paragraph.
+    """
+    text = _paragraph_text(paragraph, include_footnote_markers=True)
+    level = heading_level_from_style_prefix(paragraph_style_id(paragraph))
     if level is not None:
         return f"{'#' * level} {text}"
     return text
 
 
-def _parse_document_xml(raw_xml: bytes) -> etree._Element:
-    try:
-        return etree.fromstring(raw_xml, parser=_hardened_parser())
-    except etree.XMLSyntaxError as exc:
-        message = f"not a valid .docx file: malformed XML in {_DOCUMENT_PART}: {exc}"
-        raise InvalidDocumentError(message) from exc
+def get_body(document_root: etree._Element, *, part_name: str = DOCUMENT_PART) -> etree._Element:
+    """Return `word/document.xml`'s `<w:body>`, or raise if it is missing.
+
+    Shared by `extract_text`, `docx_mcp.structure`, and `docx_mcp.metadata`,
+    so "a `.docx` without a `<w:body>` is invalid" has exactly one check.
+    """
+    body = document_root.find("w:body", namespaces=NSMAP)
+    if body is None:
+        raise InvalidDocumentError(f"not a valid .docx file: no <w:body> in {part_name}")
+    return body
 
 
 def extract_text(docx_path: Path, *, max_size_bytes: int = MAX_DOCX_SIZE_BYTES) -> str:
@@ -132,30 +165,11 @@ def extract_text(docx_path: Path, *, max_size_bytes: int = MAX_DOCX_SIZE_BYTES) 
             `max_size_bytes`, is not a valid ZIP archive, is missing
             `word/document.xml`, or that part is not well-formed XML.
     """
-    if not docx_path.is_file():
-        raise InvalidDocumentError(f"file not found: {docx_path}")
+    with validate_and_open(docx_path, max_size_bytes=max_size_bytes) as archive:
+        raw_xml = read_part(archive, DOCUMENT_PART)
 
-    size = docx_path.stat().st_size
-    if size > max_size_bytes:
-        raise InvalidDocumentError(
-            f"file exceeds the maximum allowed size ({size} > {max_size_bytes} bytes)"
-        )
+    root = parse_xml(raw_xml, part_name=DOCUMENT_PART)
+    body = get_body(root)
 
-    try:
-        with zipfile.ZipFile(docx_path) as archive:
-            try:
-                raw_xml = archive.read(_DOCUMENT_PART)
-            except KeyError as exc:
-                raise InvalidDocumentError(
-                    f"not a valid .docx file: missing {_DOCUMENT_PART}"
-                ) from exc
-    except zipfile.BadZipFile as exc:
-        raise InvalidDocumentError("not a valid .docx file: not a ZIP archive") from exc
-
-    root = _parse_document_xml(raw_xml)
-    body = root.find("w:body", namespaces=_NSMAP)
-    if body is None:
-        raise InvalidDocumentError(f"not a valid .docx file: no <w:body> in {_DOCUMENT_PART}")
-
-    paragraphs = body.findall("w:p", namespaces=_NSMAP)
-    return "\n".join(_render_paragraph(p) for p in paragraphs)
+    paragraphs = body.findall("w:p", namespaces=NSMAP)
+    return "\n".join(render_paragraph(p) for p in paragraphs)

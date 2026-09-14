@@ -32,13 +32,16 @@ docx-mcp/
 │  ├─ server.py                   #   MCPServer factory + tool registration, as thin wrappers
 │  ├─ config.py                   #   environment-variable configuration (DOCX_MCP_ALLOWED_ROOTS, DOCX_MCP_LOG_LEVEL)
 │  ├─ security.py                 #   path sandboxing (resolve_safe_path)
-│  ├─ document.py                 #   OOXML parsing/extraction for read_document (lxml, hardened parser)
+│  ├─ ooxml.py                    #   (from Phase 2) generic OOXML/zip plumbing shared by every parsing module
+│  ├─ document.py                 #   OOXML parsing/extraction for read_document; owns WordprocessingML paragraph rendering, reused by structure.py/metadata.py
+│  ├─ structure.py                #   (from Phase 2) get_structure: heading resolution via styles.xml, tables, footnote-anchor index
+│  ├─ metadata.py                 #   (from Phase 2) get_metadata: docProps/core.xml + word count
 │  └─ specs/                      #   per-tool specifications (one file per tool, from templates/tool-spec.md)
 └─ tests/                         # mirrors src/docx_mcp/
    └─ fixtures/                   # small synthetic .docx fixtures — never real personal documents
 ```
 
-> **Phase 0 note (historical):** as of Phase 0, only `README.md`, `CONTRIBUTING.md`, `Roadmap.md`, `docs/`, `templates/`, `.gitignore`, and `.env.example` existed as real content; `src/docx_mcp/`, `tests/`, and `tests/fixtures/` existed as empty folders (kept in git via `.gitkeep`). As of Phase 1 ([ADR-0001](adr/0001-ooxml-library-and-module-layout.md), [ADR-0002](adr/0002-dependency-and-lockfile-strategy.md)), `pyproject.toml` and the module layout above exist for real; the `.gitkeep` placeholders are gone.
+> **Phase 0 note (historical):** as of Phase 0, only `README.md`, `CONTRIBUTING.md`, `Roadmap.md`, `docs/`, `templates/`, `.gitignore`, and `.env.example` existed as real content; `src/docx_mcp/`, `tests/`, and `tests/fixtures/` existed as empty folders (kept in git via `.gitkeep`). As of Phase 1 ([ADR-0001](adr/0001-ooxml-library-and-module-layout.md), [ADR-0002](adr/0002-dependency-and-lockfile-strategy.md)), `pyproject.toml` and the module layout above exist for real; the `.gitkeep` placeholders are gone. As of Phase 2 ([ADR-0003](adr/0003-phase-2-module-layout.md)), `document.py` is split: `ooxml.py` holds the generic zip/hardened-parser plumbing every parsing module shares, and `structure.py`/`metadata.py` are new tool-logic modules that reuse `document.py`'s paragraph-rendering helpers rather than duplicating them.
 
 ---
 

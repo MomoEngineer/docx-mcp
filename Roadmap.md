@@ -59,11 +59,11 @@ Phased implementation plan for docx-mcp. The plan is **iterative**: a thin, work
 
 ## Phase 2 – Structural Read: `get_structure`, `get_metadata`
 
-**Goal:** expose the document's structure — heading hierarchy, table-of-contents entries, table contents rendered as text, and a paragraph index — plus core document metadata (title, author, created/modified, word count). Still read-only.
+**Goal:** expose the document's structure — heading hierarchy, table-of-contents entries, table contents rendered as text, a paragraph index, and a lightweight footnote-anchor index (id + anchor paragraph, no resolved content — see [specs/get_structure.md §3](src/docx_mcp/specs/get_structure.md#3-output-schema) for why this doesn't pull Phase 3's content-resolution scope forward) — plus core document metadata (title, author, created/modified, word count). Still read-only.
 
 **Scope:** tool specs and tests for `get_structure` and `get_metadata`, written first; fixtures extended with a table and a multi-level heading structure; implementation against those fixtures.
 
-**Definition of Done:** `get_structure` correctly reports heading levels, table-of-contents entries, and table content as text against the fixtures; `get_metadata` reports core properties correctly; tests green; no regression in Phase 1's `read_document`.
+**Definition of Done:** `get_structure` correctly reports heading levels (resolved via `styles.xml`'s `outlineLvl`/`basedOn` chain, not just the built-in style-id heuristic), table-of-contents entries, table content as text, and the footnote-anchor index against the fixtures; `get_metadata` reports core properties and word count correctly; tests green; no regression in Phase 1's `read_document`.
 
 ---
 

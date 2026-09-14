@@ -15,11 +15,13 @@ run automatically by the test suite).
 
 from __future__ import annotations
 
+import datetime
 import shutil
 import zipfile
 from pathlib import Path
 
 from docx import Document
+from docx.enum.style import WD_STYLE_TYPE
 from lxml import etree
 
 FIXTURES_DIR = Path(__file__).parent
@@ -161,7 +163,69 @@ def generate_minimal_docx() -> Path:
     return output_path
 
 
+def generate_structured_docx() -> Path:
+    """Build `tests/fixtures/structured.docx` for `get_structure`/`get_metadata` (Phase 2).
+
+    Three heading levels, including one *custom-named* style (`MySectionHeading`)
+    that is `w:basedOn` built-in `Heading 2` and declares no `w:outlineLvl` of its
+    own - it must resolve to heading level 2 purely through the `w:basedOn` chain,
+    the case [specs/get_structure.md §3](../../src/docx_mcp/specs/get_structure.md#3-output-schema)
+    describes. Also a table with one horizontally merged cell (`w:gridSpan`), and
+    deterministic core properties for `get_metadata`.
+
+    Expected `get_structure` output (see `tests/test_structure.py`):
+
+        paragraphs[0] = "Introduction"                        style_id=Heading1  level=1
+        paragraphs[1] = "This is a plain paragraph under the introduction." style_id=None level=None
+        paragraphs[2] = "Background"                          style_id=Heading2  level=2
+        paragraphs[3] = "Custom styled heading text"    style_id=MySectionHeading level=2 (basedOn)
+        paragraphs[4] = "Deep Dive"                            style_id=Heading3  level=3
+        paragraphs[5] = "Final plain paragraph."               style_id=None level=None
+        tables[0].rows = [["Header A", "Header B"], ["Value 1", "Value 2"], ["Merged Row"]]
+
+    Expected `get_metadata` output:
+
+        title="Structured Test Document", author="Test Author",
+        created="2024-01-01T00:00:00Z", modified="2024-06-15T12:30:00Z",
+        word_count=29 (19 from paragraphs + 10 from table cells)
+    """
+    document = Document()
+    document.add_heading("Introduction", level=1)
+    document.add_paragraph("This is a plain paragraph under the introduction.")
+    document.add_heading("Background", level=2)
+
+    custom_style = document.styles.add_style("MySectionHeading", WD_STYLE_TYPE.PARAGRAPH)
+    custom_style.base_style = document.styles["Heading 2"]
+    document.add_paragraph("Custom styled heading text", style=custom_style)
+
+    document.add_heading("Deep Dive", level=3)
+    document.add_paragraph("Final plain paragraph.")
+
+    table = document.add_table(rows=3, cols=2)
+    table.style = "Table Grid"
+    table.cell(0, 0).text = "Header A"
+    table.cell(0, 1).text = "Header B"
+    table.cell(1, 0).text = "Value 1"
+    table.cell(1, 1).text = "Value 2"
+    merged_cell = table.cell(2, 0)
+    merged_cell.merge(table.cell(2, 1))
+    merged_cell.text = "Merged Row"
+
+    document.core_properties.title = "Structured Test Document"
+    document.core_properties.author = "Test Author"
+    document.core_properties.created = datetime.datetime(2024, 1, 1, 0, 0, 0, tzinfo=datetime.UTC)
+    document.core_properties.modified = datetime.datetime(
+        2024, 6, 15, 12, 30, 0, tzinfo=datetime.UTC
+    )
+
+    output_path = FIXTURES_DIR / "structured.docx"
+    document.save(output_path)
+    return output_path
+
+
 if __name__ == "__main__":
     shutil.rmtree(FIXTURES_DIR / "__pycache__", ignore_errors=True)
-    path = generate_minimal_docx()
-    print(f"wrote {path}")
+    minimal_path = generate_minimal_docx()
+    print(f"wrote {minimal_path}")
+    structured_path = generate_structured_docx()
+    print(f"wrote {structured_path}")
