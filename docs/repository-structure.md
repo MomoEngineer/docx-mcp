@@ -36,12 +36,13 @@ docx-mcp/
 │  ├─ document.py                 #   OOXML parsing/extraction for read_document; owns WordprocessingML paragraph rendering, reused by structure.py/metadata.py
 │  ├─ structure.py                #   (from Phase 2) get_structure: heading resolution via styles.xml, tables, footnote-anchor index
 │  ├─ metadata.py                 #   (from Phase 2) get_metadata: docProps/core.xml + word count
+│  ├─ footnotes.py                #   (from Phase 3) get_footnotes: word/footnotes.xml content, resolved against document.py's shared anchor index
 │  └─ specs/                      #   per-tool specifications (one file per tool, from templates/tool-spec.md)
 └─ tests/                         # mirrors src/docx_mcp/
    └─ fixtures/                   # small synthetic .docx fixtures — never real personal documents
 ```
 
-> **Phase 0 note (historical):** as of Phase 0, only `README.md`, `CONTRIBUTING.md`, `Roadmap.md`, `docs/`, `templates/`, `.gitignore`, and `.env.example` existed as real content; `src/docx_mcp/`, `tests/`, and `tests/fixtures/` existed as empty folders (kept in git via `.gitkeep`). As of Phase 1 ([ADR-0001](adr/0001-ooxml-library-and-module-layout.md), [ADR-0002](adr/0002-dependency-and-lockfile-strategy.md)), `pyproject.toml` and the module layout above exist for real; the `.gitkeep` placeholders are gone. As of Phase 2 ([ADR-0003](adr/0003-phase-2-module-layout.md)), `document.py` is split: `ooxml.py` holds the generic zip/hardened-parser plumbing every parsing module shares, and `structure.py`/`metadata.py` are new tool-logic modules that reuse `document.py`'s paragraph-rendering helpers rather than duplicating them.
+> **Phase 0 note (historical):** as of Phase 0, only `README.md`, `CONTRIBUTING.md`, `Roadmap.md`, `docs/`, `templates/`, `.gitignore`, and `.env.example` existed as real content; `src/docx_mcp/`, `tests/`, and `tests/fixtures/` existed as empty folders (kept in git via `.gitkeep`). As of Phase 1 ([ADR-0001](adr/0001-ooxml-library-and-module-layout.md), [ADR-0002](adr/0002-dependency-and-lockfile-strategy.md)), `pyproject.toml` and the module layout above exist for real; the `.gitkeep` placeholders are gone. As of Phase 2 ([ADR-0003](adr/0003-phase-2-module-layout.md)), `document.py` is split: `ooxml.py` holds the generic zip/hardened-parser plumbing every parsing module shares, and `structure.py`/`metadata.py` are new tool-logic modules that reuse `document.py`'s paragraph-rendering helpers rather than duplicating them. As of Phase 3 ([ADR-0004](adr/0004-phase-3-footnote-module-and-shared-anchor-resolution.md)), `footnotes.py` is a new tool-logic module for `get_footnotes`; the footnote-anchor-finding loop `structure.py` previously implemented inline moved into `document.py` as a shared, presentation-agnostic helper (`find_footnote_anchors`), reused by both `structure.py` and `footnotes.py` so the two tools cannot disagree on which paragraph anchors which footnote id.
 
 ---
 

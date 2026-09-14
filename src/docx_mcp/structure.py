@@ -8,7 +8,10 @@ lightweight footnote-anchor index. Heading-level resolution walks
 [specs/get_structure.md §3](specs/get_structure.md#3-output-schema) for the
 exact resolution order and [ADR-0003](../../docs/adr/0003-phase-2-module-layout.md)
 for why this reuses `document.py`'s paragraph-text helper instead of
-re-implementing paragraph traversal.
+re-implementing paragraph traversal. The footnote-anchor index itself is built
+from `document.py`'s `find_footnote_anchors`, shared with `docx_mcp.footnotes`
+(Phase 3) - see
+[ADR-0004](../../docs/adr/0004-phase-3-footnote-module-and-shared-anchor-resolution.md).
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ from docx_mcp.document import (
     DOCUMENT_PART,
     NSMAP,
     WORD_NS,
+    find_footnote_anchors,
     get_body,
     heading_level_from_style_prefix,
     paragraph_plain_text,
@@ -39,9 +43,7 @@ from docx_mcp.ooxml import (
 STYLES_PART = "word/styles.xml"
 
 _W_STYLE_ID = f"{{{WORD_NS}}}styleId"
-_W_ID = f"{{{WORD_NS}}}id"
 _W_VAL = f"{{{WORD_NS}}}val"
-_W_FOOTNOTE_REFERENCE = f"{{{WORD_NS}}}footnoteReference"
 
 _BODY_TEXT_OUTLINE_VAL = 9
 _MAX_BASED_ON_HOPS = 64
@@ -246,7 +248,6 @@ def get_document_structure(
 
     paragraphs: list[ParagraphInfo] = []
     toc: list[TocEntry] = []
-    footnotes: list[FootnoteAnchor] = []
     for index, paragraph in enumerate(body.findall("w:p", namespaces=NSMAP)):
         text = paragraph_plain_text(paragraph)
         style_id = paragraph_style_id(paragraph)
@@ -258,10 +259,11 @@ def get_document_structure(
         )
         if heading_level is not None:
             toc.append(TocEntry(paragraph_index=index, level=heading_level, text=text))
-        for footnote_ref in paragraph.iter(_W_FOOTNOTE_REFERENCE):
-            footnote_id = footnote_ref.get(_W_ID)
-            if footnote_id is not None:
-                footnotes.append(FootnoteAnchor(id=footnote_id, paragraph_index=index))
+
+    footnotes = tuple(
+        FootnoteAnchor(id=footnote_id, paragraph_index=paragraph_index)
+        for footnote_id, paragraph_index in find_footnote_anchors(body)
+    )
 
     tables = tuple(
         TableInfo(table_index=table_index, rows=_render_table(table))
@@ -269,5 +271,5 @@ def get_document_structure(
     )
 
     return DocumentStructure(
-        paragraphs=tuple(paragraphs), toc=tuple(toc), tables=tables, footnotes=tuple(footnotes)
+        paragraphs=tuple(paragraphs), toc=tuple(toc), tables=tables, footnotes=footnotes
     )

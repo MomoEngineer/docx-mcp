@@ -13,7 +13,12 @@ This is also the one place `w:p`/`w:t`/`w:tab`/`w:footnoteReference`
 traversal happens: `paragraph_plain_text` (the marker-free half of
 `_render_paragraph`'s logic) and `paragraph_style_id` are reused by
 `docx_mcp.structure` and `docx_mcp.metadata` rather than re-implemented, per
-[ADR-0003](../../docs/adr/0003-phase-2-module-layout.md).
+[ADR-0003](../../docs/adr/0003-phase-2-module-layout.md). `find_footnote_anchors`
+extends that ownership to anchor-finding: it is the one place a footnote
+anchor's `(id, paragraph_index)` is computed, reused by `docx_mcp.structure`
+(the footnote-anchor index) and `docx_mcp.footnotes` (content resolution), per
+[ADR-0004](../../docs/adr/0004-phase-3-footnote-module-and-shared-anchor-resolution.md) -
+so the two tools cannot disagree on which paragraph anchors which footnote id.
 """
 
 from __future__ import annotations
@@ -36,6 +41,7 @@ __all__ = [
     "NSMAP",
     "WORD_NS",
     "extract_text",
+    "find_footnote_anchors",
     "get_body",
     "heading_level_from_style_prefix",
     "paragraph_plain_text",
@@ -142,6 +148,30 @@ def get_body(document_root: etree._Element, *, part_name: str = DOCUMENT_PART) -
     if body is None:
         raise InvalidDocumentError(f"not a valid .docx file: no <w:body> in {part_name}")
     return body
+
+
+def find_footnote_anchors(body: etree._Element) -> tuple[tuple[str, int], ...]:
+    """Every `w:footnoteReference` found while walking `body`'s top-level
+    paragraphs, as `(id, paragraph_index)` pairs in document order.
+
+    Anchor-driven and presentation-agnostic: this returns plain tuples, not a
+    tool-specific dataclass, so `docx_mcp.structure` (which pairs each anchor
+    with its own `FootnoteAnchor` output type) and `docx_mcp.footnotes` (which
+    pairs each anchor with resolved content) can each build their own typed
+    result from the same underlying data without depending on each other's
+    output schema - see
+    [ADR-0004](../../docs/adr/0004-phase-3-footnote-module-and-shared-anchor-resolution.md).
+    Only top-level `w:body/w:p` paragraphs are walked - a footnote reference
+    inside a table cell is not found here, matching `get_structure`'s existing
+    `paragraph_index` scope.
+    """
+    anchors: list[tuple[str, int]] = []
+    for index, paragraph in enumerate(body.findall("w:p", namespaces=NSMAP)):
+        for footnote_ref in paragraph.iter(_W_FOOTNOTE_REFERENCE):
+            footnote_id = footnote_ref.get(_W_ID)
+            if footnote_id is not None:
+                anchors.append((footnote_id, index))
+    return tuple(anchors)
 
 
 def extract_text(docx_path: Path, *, max_size_bytes: int = MAX_DOCX_SIZE_BYTES) -> str:

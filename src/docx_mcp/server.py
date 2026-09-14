@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from docx_mcp import __version__
 from docx_mcp.config import ServerConfig, load_config
 from docx_mcp.document import InvalidDocumentError, extract_text
+from docx_mcp.footnotes import get_document_footnotes
 from docx_mcp.metadata import get_document_metadata
 from docx_mcp.security import PathAccessError, resolve_safe_path
 from docx_mcp.structure import get_document_structure
@@ -31,6 +32,9 @@ GET_STRUCTURE_TOOL_VERSION = "1.0.0"
 
 GET_METADATA_TOOL_VERSION = "1.0.0"
 """Semantic version of `get_metadata` (see `docs/documentation-standards.md` §4.1)."""
+
+GET_FOOTNOTES_TOOL_VERSION = "1.0.0"
+"""Semantic version of `get_footnotes` (see `docs/documentation-standards.md` §4.1)."""
 
 
 class ReadDocumentResult(BaseModel):
@@ -257,6 +261,78 @@ def get_metadata(path: str) -> GetMetadataResult:
     )
 
 
+class FootnoteEntry(BaseModel):
+    """One footnote reference, resolved to its content (see `specs/get_footnotes.md` §3)."""
+
+    id: str = Field(description="The footnote's w:id.")
+    paragraph_index: int = Field(description="Index of the paragraph anchoring this footnote.")
+    content: str | None = Field(
+        description=(
+            "The footnote's text, or null if word/footnotes.xml is absent or does not "
+            "declare a matching id - never an error by itself."
+        )
+    )
+
+
+class GetFootnotesResult(BaseModel):
+    """Output of `get_footnotes` (see `specs/get_footnotes.md` §3, Output Schema)."""
+
+    footnotes: list[FootnoteEntry] = Field(
+        description=(
+            "One entry per w:footnoteReference found in the body, in document order. "
+            "Two different footnote ids anchored in the same paragraph produce two "
+            "separate entries with the same paragraph_index."
+        )
+    )
+
+
+def get_footnotes(path: str) -> GetFootnotesResult:
+    """Return every footnote a .docx file's body references: its ID, anchor paragraph, and content.
+
+    Population is anchor-driven: one entry per w:footnoteReference actually
+    found in the body (the same population get_structure's footnote index
+    uses), not one per footnote declared in word/footnotes.xml - an orphaned,
+    never-referenced footnote is intentionally excluded. Two different
+    footnote ids anchored in the same paragraph both appear, as separate
+    entries with the same paragraph_index, never collapsed into one. content
+    is resolved from word/footnotes.xml with the same marker-free text
+    assembly get_structure uses for plain paragraph text; it is null (not an
+    error) when word/footnotes.xml is absent or doesn't declare a matching
+    id. See specs/get_footnotes.md for the full specification.
+
+    Args:
+        path: Filesystem path to a `.docx` file, absolute or relative. Must
+            resolve inside one of the roots configured via
+            `DOCX_MCP_ALLOWED_ROOTS`; an empty/unset allow-list denies every
+            path.
+
+    Returns:
+        A `GetFootnotesResult` carrying the footnote list.
+
+    Raises:
+        ToolError: If `path` escapes the allowed roots, the file does not
+            exist, the file is not a valid `.docx` document, or
+            `word/footnotes.xml` is present but malformed.
+    """
+    config = load_config()
+    try:
+        safe_path = resolve_safe_path(path, config.allowed_roots)
+    except PathAccessError as exc:
+        raise ToolError(str(exc)) from exc
+
+    try:
+        footnotes = get_document_footnotes(safe_path)
+    except InvalidDocumentError as exc:
+        raise ToolError(str(exc)) from exc
+
+    return GetFootnotesResult(
+        footnotes=[
+            FootnoteEntry(id=f.id, paragraph_index=f.paragraph_index, content=f.content)
+            for f in footnotes
+        ]
+    )
+
+
 def create_server(config: ServerConfig | None = None) -> MCPServer:
     """Build the docx-mcp `MCPServer`, with its process-wide log level applied.
 
@@ -268,8 +344,8 @@ def create_server(config: ServerConfig | None = None) -> MCPServer:
             without process-global state.
 
     Returns:
-        An `MCPServer` with `read_document`, `get_structure`, and
-        `get_metadata` registered, and logging configured at
+        An `MCPServer` with `read_document`, `get_structure`, `get_metadata`,
+        and `get_footnotes` registered, and logging configured at
         `config.log_level` (see `docs/documentation-standards.md` §6,
         Logging and observability).
     """
@@ -278,6 +354,7 @@ def create_server(config: ServerConfig | None = None) -> MCPServer:
     server.add_tool(read_document, meta={"docx_mcp.tool_version": READ_DOCUMENT_TOOL_VERSION})
     server.add_tool(get_structure, meta={"docx_mcp.tool_version": GET_STRUCTURE_TOOL_VERSION})
     server.add_tool(get_metadata, meta={"docx_mcp.tool_version": GET_METADATA_TOOL_VERSION})
+    server.add_tool(get_footnotes, meta={"docx_mcp.tool_version": GET_FOOTNOTES_TOOL_VERSION})
     return server
 
 

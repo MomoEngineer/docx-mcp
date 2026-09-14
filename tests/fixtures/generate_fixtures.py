@@ -8,9 +8,10 @@ high-level footnote API. Never imported by `src/docx_mcp/`. Re-run with:
 
     python tests/fixtures/generate_fixtures.py
 
-to regenerate `minimal.docx` after changing its expected structure (keep
-`tests/test_document.py`'s expectations in sync manually - this script is not
-run automatically by the test suite).
+to regenerate `minimal.docx`/`structured.docx`/`footnotes.docx` after changing
+their expected structure (keep the corresponding test file's expectations -
+`tests/test_document.py`, `tests/test_structure.py`, `tests/test_footnotes.py`
+- in sync manually; this script is not run automatically by the test suite).
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from __future__ import annotations
 import datetime
 import shutil
 import zipfile
+from collections.abc import Sequence
 from pathlib import Path
 
 from docx import Document
@@ -53,7 +55,12 @@ def _build_base_docx(path: Path) -> None:
     document.save(path)
 
 
-def _footnotes_xml_bytes() -> bytes:
+def _footnotes_xml_bytes(footnotes_content: Sequence[tuple[str, str]]) -> bytes:
+    """Build `word/footnotes.xml`: Word's two boilerplate separator footnotes
+    (never referenced from the body - see
+    [specs/get_footnotes.md §5](../../src/docx_mcp/specs/get_footnotes.md#5-limitations-non-goals))
+    plus one real `w:footnote` per `(id, text)` pair in `footnotes_content`, in
+    the order given."""
     footnotes = etree.Element(_w("footnotes"), nsmap={"w": WORD_NS})
 
     def _boilerplate_footnote(footnote_id: str, kind: str) -> None:
@@ -72,36 +79,46 @@ def _footnotes_xml_bytes() -> bytes:
     _boilerplate_footnote("-1", "separator")
     _boilerplate_footnote("0", "continuationSeparator")
 
-    footnote = etree.SubElement(footnotes, _w("footnote"))
-    footnote.set(_w("id"), "1")
-    paragraph = etree.SubElement(footnote, _w("p"))
-    ref_run = etree.SubElement(paragraph, _w("r"))
-    ref_run_props = etree.SubElement(ref_run, _w("rPr"))
-    etree.SubElement(ref_run_props, _w("rStyle")).set(_w("val"), "FootnoteReference")
-    etree.SubElement(ref_run, _w("footnoteRef"))
-    text_run = etree.SubElement(paragraph, _w("r"))
-    text_elem = etree.SubElement(text_run, _w("t"))
-    text_elem.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
-    text_elem.text = " This is a footnote."
+    for footnote_id, text in footnotes_content:
+        footnote = etree.SubElement(footnotes, _w("footnote"))
+        footnote.set(_w("id"), footnote_id)
+        paragraph = etree.SubElement(footnote, _w("p"))
+        ref_run = etree.SubElement(paragraph, _w("r"))
+        ref_run_props = etree.SubElement(ref_run, _w("rPr"))
+        etree.SubElement(ref_run_props, _w("rStyle")).set(_w("val"), "FootnoteReference")
+        etree.SubElement(ref_run, _w("footnoteRef"))
+        text_run = etree.SubElement(paragraph, _w("r"))
+        text_elem = etree.SubElement(text_run, _w("t"))
+        text_elem.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+        text_elem.text = f" {text}"
 
     return etree.tostring(footnotes, xml_declaration=True, encoding="UTF-8", standalone=True)
 
 
-def _add_footnote_reference_to_document_xml(document_xml: bytes) -> bytes:
+def _add_footnote_references_to_document_xml(
+    document_xml: bytes, anchors: Sequence[tuple[str, str]]
+) -> bytes:
+    """Append one `w:footnoteReference` run per `(paragraph_text, footnote_id)`
+    in `anchors`, to the paragraph whose text matches `paragraph_text` exactly.
+    Multiple pairs naming the same paragraph text append multiple references
+    to it, in list order - this is how `footnotes.docx` places two footnote
+    references in one paragraph (see
+    [Roadmap.md, Phase 3](../../Roadmap.md#phase-3--footnotes-read-path-get_footnotes))."""
     root = etree.fromstring(document_xml)
     nsmap = {"w": WORD_NS}
     paragraphs = root.findall(".//w:body/w:p", namespaces=nsmap)
-    target = next(
-        p
-        for p in paragraphs
-        if "".join(t.text or "" for t in p.findall(".//w:t", namespaces=nsmap))
-        == "This paragraph has a footnote reference."
-    )
-    run = etree.SubElement(target, _w("r"))
-    run_props = etree.SubElement(run, _w("rPr"))
-    etree.SubElement(run_props, _w("rStyle")).set(_w("val"), "FootnoteReference")
-    ref = etree.SubElement(run, _w("footnoteReference"))
-    ref.set(_w("id"), "1")
+
+    def _paragraph_text(paragraph: etree._Element) -> str:
+        return "".join(t.text or "" for t in paragraph.findall(".//w:t", namespaces=nsmap))
+
+    for paragraph_text, footnote_id in anchors:
+        target = next(p for p in paragraphs if _paragraph_text(p) == paragraph_text)
+        run = etree.SubElement(target, _w("r"))
+        run_props = etree.SubElement(run, _w("rPr"))
+        etree.SubElement(run_props, _w("rStyle")).set(_w("val"), "FootnoteReference")
+        ref = etree.SubElement(run, _w("footnoteReference"))
+        ref.set(_w("id"), footnote_id)
+
     return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
 
 
@@ -124,17 +141,30 @@ def _add_footnotes_relationship(rels_xml: bytes) -> bytes:
     return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
 
 
-def _splice_in_footnote(base_path: Path, output_path: Path) -> None:
-    """Rewrite `base_path` into `output_path`, adding a real footnote part and reference."""
+def _splice_in_footnotes(
+    base_path: Path,
+    output_path: Path,
+    *,
+    anchors: Sequence[tuple[str, str]],
+    footnotes_content: Sequence[tuple[str, str]],
+) -> None:
+    """Rewrite `base_path` into `output_path`, adding a real `word/footnotes.xml`
+    part, its `[Content_Types].xml` override and relationship, and one
+    `w:footnoteReference` run per `anchors` entry. `anchors` is
+    `(paragraph_text, footnote_id)` pairs consumed by
+    `_add_footnote_references_to_document_xml`; `footnotes_content` is
+    `(footnote_id, text)` pairs consumed by `_footnotes_xml_bytes`."""
     with zipfile.ZipFile(base_path) as source:
         parts = {name: source.read(name) for name in source.namelist()}
 
-    parts["word/document.xml"] = _add_footnote_reference_to_document_xml(parts["word/document.xml"])
+    parts["word/document.xml"] = _add_footnote_references_to_document_xml(
+        parts["word/document.xml"], anchors
+    )
     parts["[Content_Types].xml"] = _add_footnotes_content_type(parts["[Content_Types].xml"])
     parts["word/_rels/document.xml.rels"] = _add_footnotes_relationship(
         parts["word/_rels/document.xml.rels"]
     )
-    parts["word/footnotes.xml"] = _footnotes_xml_bytes()
+    parts["word/footnotes.xml"] = _footnotes_xml_bytes(footnotes_content)
 
     with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, data in parts.items():
@@ -157,7 +187,12 @@ def generate_minimal_docx() -> Path:
     base_path = FIXTURES_DIR / "_minimal_base.docx"
     try:
         _build_base_docx(base_path)
-        _splice_in_footnote(base_path, output_path)
+        _splice_in_footnotes(
+            base_path,
+            output_path,
+            anchors=[("This paragraph has a footnote reference.", "1")],
+            footnotes_content=[("1", "This is a footnote.")],
+        )
     finally:
         base_path.unlink(missing_ok=True)
     return output_path
@@ -223,9 +258,76 @@ def generate_structured_docx() -> Path:
     return output_path
 
 
+def _build_footnotes_base_docx(path: Path) -> None:
+    """Build headings + plain paragraphs for `footnotes.docx` (no footnotes yet)."""
+    document = Document()
+    document.add_heading("Introduction", level=1)
+    document.add_paragraph("This is a plain paragraph.")
+    document.add_paragraph("This paragraph has two footnotes.")
+    document.add_heading("Background", level=2)
+    document.add_paragraph("This paragraph has a third footnote.")
+    document.add_paragraph("Final paragraph.")
+    document.save(path)
+
+
+def generate_footnotes_docx() -> Path:
+    """Build `tests/fixtures/footnotes.docx` for `get_footnotes` (Phase 3).
+
+    Three real footnotes: ids `1` and `2` both anchored in paragraph 2 - the
+    "two footnotes in the same paragraph" edge case
+    [Roadmap.md, Phase 3](../../Roadmap.md#phase-3--footnotes-read-path-get_footnotes)
+    calls out as most likely to break a naive anchor-to-paragraph mapping -
+    and id `3` anchored in a separate paragraph, 4.
+
+    Expected `get_structure`/`read_document` paragraph layout (see
+    `tests/test_footnotes.py`, `tests/test_get_footnotes_tool.py`):
+
+        paragraphs[0] = "Introduction"                          (Heading1)
+        paragraphs[1] = "This is a plain paragraph."
+        paragraphs[2] = "This paragraph has two footnotes."      <- anchors id=1, id=2
+        paragraphs[3] = "Background"                             (Heading2)
+        paragraphs[4] = "This paragraph has a third footnote."   <- anchor id=3
+        paragraphs[5] = "Final paragraph."
+
+    Expected `get_footnotes` output (content carries the leading space Word
+    itself writes after the auto-number in the footnote's text run - the same
+    convention `minimal.docx`'s existing single footnote already uses,
+    preserved verbatim per `xml:space="preserve"` rather than trimmed):
+
+        footnotes = [
+            {"id": "1", "paragraph_index": 2, "content": " First footnote."},
+            {"id": "2", "paragraph_index": 2, "content": " Second footnote."},
+            {"id": "3", "paragraph_index": 4, "content": " Third footnote."},
+        ]
+    """
+    output_path = FIXTURES_DIR / "footnotes.docx"
+    base_path = FIXTURES_DIR / "_footnotes_base.docx"
+    try:
+        _build_footnotes_base_docx(base_path)
+        _splice_in_footnotes(
+            base_path,
+            output_path,
+            anchors=[
+                ("This paragraph has two footnotes.", "1"),
+                ("This paragraph has two footnotes.", "2"),
+                ("This paragraph has a third footnote.", "3"),
+            ],
+            footnotes_content=[
+                ("1", "First footnote."),
+                ("2", "Second footnote."),
+                ("3", "Third footnote."),
+            ],
+        )
+    finally:
+        base_path.unlink(missing_ok=True)
+    return output_path
+
+
 if __name__ == "__main__":
     shutil.rmtree(FIXTURES_DIR / "__pycache__", ignore_errors=True)
     minimal_path = generate_minimal_docx()
     print(f"wrote {minimal_path}")
     structured_path = generate_structured_docx()
     print(f"wrote {structured_path}")
+    footnotes_path = generate_footnotes_docx()
+    print(f"wrote {footnotes_path}")

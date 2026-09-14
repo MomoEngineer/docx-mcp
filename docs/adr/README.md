@@ -43,9 +43,10 @@ An ADR is created for, among others:
 | [0001](0001-ooxml-library-and-module-layout.md) | OOXML Handling Library and Module Layout | Accepted |
 | [0002](0002-dependency-and-lockfile-strategy.md) | Dependency and Lockfile Strategy | Accepted |
 | [0003](0003-phase-2-module-layout.md) | Phase 2 Module Layout: Splitting `document.py` | Accepted |
+| [0004](0004-phase-3-footnote-module-and-shared-anchor-resolution.md) | Phase 3 Module Layout: `footnotes.py` and Shared Footnote-Anchor Resolution | Accepted |
 
 ---
 
 ## 5. Open/planned ADRs
 
-- None currently open. The three ADRs required so far (OOXML library, dependency/lockfile strategy, Phase 2 module layout) are decided above.
+- None currently open. The four ADRs required so far (OOXML library, dependency/lockfile strategy, Phase 2 module layout, Phase 3 module layout) are decided above.
