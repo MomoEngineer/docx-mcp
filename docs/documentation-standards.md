@@ -36,7 +36,7 @@ ADR-required, among others:
 
 ## 4. Reproducibility and tool versioning
 
-- **Version pinning** via a lockfile, once the dependency strategy is decided (Phase 1).
+- **Version pinning:** minimum-version constraints in `pyproject.toml`, no dedicated lockfile tool for now — decided in Phase 1 via [ADR-0002](adr/0002-dependency-and-lockfile-strategy.md).
 - Run metadata is recorded wherever a result could vary: tool version, timestamp.
 
 ### 4.1 Tool versioning

@@ -16,7 +16,7 @@ tests/
 └─ ...                # mirrors src/docx_mcp/, populated from Phase 1 onward
 ```
 
-As of Phase 0, only `tests/` and `tests/fixtures/` exist, as empty folders. Fixtures are added starting Phase 1 (headings, a footnote, plain paragraphs), extended per phase as new tools need them — a table and multi-level headings in Phase 2, multiple footnotes including two anchored in the same paragraph in Phase 3, text split across runs in Phase 4, and so on (see [Roadmap.md](../Roadmap.md)).
+As of Phase 0, only `tests/` and `tests/fixtures/` existed, as empty folders. Phase 1 added `tests/fixtures/minimal.docx` (headings, a footnote, plain paragraphs) and the tests that read it; fixtures are extended per later phase as new tools need them — a table and multi-level headings in Phase 2, multiple footnotes including two anchored in the same paragraph in Phase 3, text split across runs in Phase 4, and so on (see [Roadmap.md](../Roadmap.md)).
 
 ---
 
@@ -53,7 +53,7 @@ For chains where tools build on each other — e.g. `insert_paragraph` followed 
 
 - **Test runner:** `pytest` (`python -m pytest tests -q`).
 - **Static checks:** `ruff check`, `ruff format --check`, `mypy src` (see [CONTRIBUTING.md §6](../CONTRIBUTING.md#6-running-quality-checks-locally)).
-- Test dependencies and any lockfile strategy are decided in Phase 1, alongside the OOXML library ADR (see [CONTRIBUTING.md §3](../CONTRIBUTING.md#3-technical-stack)).
+- Test dependencies (`pytest`) and the "no dedicated lockfile" strategy were decided in Phase 1 alongside the OOXML library ADR (see [CONTRIBUTING.md §3](../CONTRIBUTING.md#3-technical-stack), [ADR-0002](adr/0002-dependency-and-lockfile-strategy.md)).
 
 No fixed line-coverage threshold is mandated; the binding bar is the Definition of Done in [CONTRIBUTING.md §5](../CONTRIBUTING.md#5-definition-of-done) — every path described in a tool's specification is covered by a green test.
 

@@ -18,6 +18,10 @@ dist/
 # Secrets & local configuration
 .env
 
+# Real personal documents used for local, manual verification only - never a
+# committed test fixture (see docs/testing.md: fixtures must be synthetic).
+/Ass.docx
+
 # Operating system
 Thumbs.db
 .DS_Store

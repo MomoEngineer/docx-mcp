@@ -40,10 +40,11 @@ An ADR is created for, among others:
 
 | No. | Title | Status |
 | --- | --- | --- |
-| — | *(none yet — the first ADR is expected in Phase 1, deciding the OOXML library)* | — |
+| [0001](0001-ooxml-library-and-module-layout.md) | OOXML Handling Library and Module Layout | Accepted |
+| [0002](0002-dependency-and-lockfile-strategy.md) | Dependency and Lockfile Strategy | Accepted |
 
 ---
 
 ## 5. Open/planned ADRs
 
-- Phase 1 requires an ADR deciding the OOXML library (`lxml` vs. `xml.etree`) and, tied to it, the dependency/lockfile strategy (see [CONTRIBUTING.md §3](../../CONTRIBUTING.md#3-technical-stack)).
+- None currently open. The two ADRs required by Phase 1 (OOXML library, dependency/lockfile strategy) are decided above.

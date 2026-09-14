@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "docx-mcp"
+version = "0.1.0"
+description = "MCP server that lets AI agents read and edit .docx Word documents while preserving formatting"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{ name = "Moritz Heilemann" }]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "mcp>=2.2,<3",
+    "lxml>=5",
+]
+
+[project.scripts]
+docx-mcp = "docx_mcp.__main__:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "lxml-stubs>=0.5",
+    "python-docx>=1.1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/docx_mcp"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+mypy_path = "src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

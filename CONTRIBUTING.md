@@ -37,11 +37,11 @@ Phase 0 ([Roadmap.md](Roadmap.md#phase-0--repository-foundations)) establishes t
 ## 3. Technical stack
 
 - **Language:** Python, `requires-python = ">=3.11"`.
-- **MCP server:** the official **MCP Python SDK** (`mcp`, including FastMCP), transport `stdio` — consistent with `research-graphrag`.
-- **OOXML handling:** direct manipulation of the `.docx` ZIP/XML structure (not a high-level library like `python-docx`), so existing formatting, styles, tables, and footnotes survive edits untouched. The exact XML library (`lxml` vs. the standard-library `xml.etree`) is decided in Phase 1 via ADR, once the first real parsing/editing needs are known.
+- **MCP server:** the official **MCP Python SDK** (`mcp`), transport `stdio` — consistent with `research-graphrag`. Tools are registered via its ergonomic server API, `mcp.server.mcpserver.MCPServer` (named `FastMCP` in the `mcp` 1.x line; renamed in the `mcp` 2.x line this project pins — see [ADR-0002](docs/adr/0002-dependency-and-lockfile-strategy.md)).
+- **OOXML handling:** direct manipulation of the `.docx` ZIP/XML structure (not a high-level library like `python-docx`), so existing formatting, styles, tables, and footnotes survive edits untouched. The XML library is `lxml`, with a hardened, entity-resolution-disabled parser configuration — decided in Phase 1 via [ADR-0001](docs/adr/0001-ooxml-library-and-module-layout.md).
 - **Tests:** `pytest`, offline, against small synthetic fixture `.docx` files checked into `tests/fixtures/` — never against real personal documents.
 - **Static quality:** `ruff` (lint + format) and `mypy` (types).
-- **Dependencies/lockfile:** decided in Phase 1, once the OOXML library choice is fixed.
+- **Dependencies/lockfile:** `pyproject.toml` with minimum-version constraints, no dedicated lockfile tool — decided in Phase 1 via [ADR-0002](docs/adr/0002-dependency-and-lockfile-strategy.md).
 
 ---
 
@@ -86,7 +86,11 @@ python -m venv .venv
 # macOS/Linux: source .venv/bin/activate
 ```
 
-Once `pyproject.toml` and its dependency/lockfile strategy exist (Phase 1, see [Roadmap.md](Roadmap.md#phase-1--thin-vertical-slice-server-skeleton--read_document)), install the project in editable mode with its dev extras, then run:
+Install the project in editable mode with its dev extras, then run:
+
+```bash
+pip install -e ".[dev]"
+```
 
 ```bash
 python -m ruff check .
