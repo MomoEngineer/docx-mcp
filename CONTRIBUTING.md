@@ -78,6 +78,16 @@ A contribution counts as done when the applicable points are satisfied:
 
 ## 6. Running quality checks locally
 
+Create and activate the virtual environment (Python 3.11+, see [README.md](README.md#installation)):
+
+```bash
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+# macOS/Linux: source .venv/bin/activate
+```
+
+Once `pyproject.toml` and its dependency/lockfile strategy exist (Phase 1, see [Roadmap.md](Roadmap.md#phase-1--thin-vertical-slice-server-skeleton--read_document)), install the project in editable mode with its dev extras, then run:
+
 ```bash
 python -m ruff check .
 python -m ruff format --check .

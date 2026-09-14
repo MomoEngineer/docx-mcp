@@ -28,14 +28,14 @@ Phased implementation plan for docx-mcp. The plan is **iterative**: a thin, work
 | [README.md](README.md) — project scope, features, tool list | Done |
 | [CONTRIBUTING.md](CONTRIBUTING.md) — rulebook, workflow, Definition of Done | Done |
 | [Roadmap.md](Roadmap.md) — this document | Done |
-| Folder skeleton (`src/docx_mcp/`, `tests/`, `tests/fixtures/`, `docs/`, `docs/adr/`, `templates/`) | Open |
-| `templates/tool-spec.md` — tool specification template | Open |
-| `templates/adr-template.md` — ADR template | Open |
-| `docs/adr/README.md` — ADR process | Open |
-| `docs/repository-structure.md` — binding folder structure | Open |
-| `docs/testing.md` — test strategy (fixture-based, offline, spec-first) | Open |
-| `docs/documentation-standards.md` — docstrings, typing, tool-spec, security, logging | Open |
-| `docs/security-model.md` — path-sandboxing rules, atomic-write contract, threat model | Open |
+| Folder skeleton (`src/docx_mcp/`, `tests/`, `tests/fixtures/`, `docs/`, `docs/adr/`, `templates/`) | Done |
+| `templates/tool-spec.md` — tool specification template | Done |
+| `templates/adr-template.md` — ADR template | Done |
+| `docs/adr/README.md` — ADR process | Done |
+| `docs/repository-structure.md` — binding folder structure | Done |
+| `docs/testing.md` — test strategy (fixture-based, offline, spec-first) | Done |
+| `docs/documentation-standards.md` — docstrings, typing, tool-spec, security, logging | Done |
+| `docs/security-model.md` — path-sandboxing rules, atomic-write contract, threat model | Done |
 
 **Definition of Done:** every deliverable above exists, cross-references the others where relevant, and no deliverable describes a rule that a later phase then has to contradict. No `pyproject.toml`, no source code — that begins in Phase 1.
 
