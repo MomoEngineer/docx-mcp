@@ -323,6 +323,74 @@ def generate_footnotes_docx() -> Path:
     return output_path
 
 
+def generate_run_split_docx() -> Path:
+    """Build `tests/fixtures/run_split.docx` for `find_text`/`replace_text` (Phase 4).
+
+    Pure `python-docx` - no raw-XML surgery needed, unlike `minimal.docx`/
+    `footnotes.docx`, since none of this fixture's edge cases (split runs, a
+    tab, repeated occurrences) require an API `python-docx` lacks. Footnote-
+    adjacency is deliberately *not* covered here: `minimal.docx` (Phase 1)
+    already anchors a footnote right after the text "This paragraph has a
+    footnote reference." - reused as-is by
+    `tests/integration/test_find_text_replace_text_consistency.py` - so this
+    fixture stays focused on the run-splitting/tab/multi-match cases that
+    fixture cannot exercise.
+
+    Expected `find_text`/`replace_text` behavior (see `tests/test_text_edit.py`,
+    `tests/test_find_text_tool.py`, `tests/test_replace_text_tool.py`):
+
+        paragraphs[0] = "Please receive this message."
+            "receive" (offsets 7-14) spans two runs with DIFFERENT rPr
+            (bold, then explicitly not-bold) - proves boundary-run formatting
+            preservation and that the *leftmost* matched run's rPr (bold)
+            wins for the replacement text.
+        paragraphs[1] = "This is a simple example sentence." (whole paragraph italic)
+            "simple" (offsets 10-16) is fully inside one non-default-formatted
+            run - the trivial single-run case, verifying the replacement
+            actually copies rPr (italic), not just "didn't crash".
+        paragraphs[2] = "Left\tRight" (two runs plus a manual w:tab)
+            The full text spans a `w:tab`, which a match consuming it must
+            remove outright, not leave as an orphaned empty element.
+        paragraphs[3] = "This paragraph mentions test, test, and test again."
+            "test" appears 3x in ONE paragraph - proves same-paragraph
+            multi-match replacement doesn't drift offsets (reverse-order
+            application, ADR-0005).
+        paragraphs[4] = "One more test paragraph for global replace."
+            A 4th "test" occurrence in a DIFFERENT paragraph - proves a
+            global replace (no location given) correctly spans paragraphs;
+            total occurrences of "test" across the whole document = 4.
+
+    Deliberately, no other paragraph contains the substring "test" (paragraph
+    1 says "example", not "test"), so a global replace of "test" has an exact,
+    unambiguous expected count.
+    """
+    document = Document()
+
+    paragraph = document.add_paragraph()
+    paragraph.add_run("Please ")
+    bold_run = paragraph.add_run("rec")
+    bold_run.bold = True
+    not_bold_run = paragraph.add_run("eive")
+    not_bold_run.bold = False
+    paragraph.add_run(" this message.")
+
+    italic_paragraph = document.add_paragraph()
+    italic_run = italic_paragraph.add_run("This is a simple example sentence.")
+    italic_run.italic = True
+
+    tab_paragraph = document.add_paragraph()
+    tab_paragraph.add_run("Left")
+    tab_paragraph.add_run().add_tab()
+    tab_paragraph.add_run("Right")
+
+    document.add_paragraph("This paragraph mentions test, test, and test again.")
+    document.add_paragraph("One more test paragraph for global replace.")
+
+    output_path = FIXTURES_DIR / "run_split.docx"
+    document.save(output_path)
+    return output_path
+
+
 if __name__ == "__main__":
     shutil.rmtree(FIXTURES_DIR / "__pycache__", ignore_errors=True)
     minimal_path = generate_minimal_docx()
@@ -331,3 +399,5 @@ if __name__ == "__main__":
     print(f"wrote {structured_path}")
     footnotes_path = generate_footnotes_docx()
     print(f"wrote {footnotes_path}")
+    run_split_path = generate_run_split_docx()
+    print(f"wrote {run_split_path}")

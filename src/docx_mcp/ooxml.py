@@ -7,10 +7,21 @@ same hardened-parsing/zip-opening logic `document.py`'s `extract_text` already
 had. Deliberately has no knowledge of any WordprocessingML tag (`w:p`, `w:tbl`,
 ...) - that rendering logic stays in `document.py`, the one module that owns
 "how a paragraph's text is assembled from its runs".
+
+As of Phase 4 ([ADR-0005](../../docs/adr/0005-phase-4-text-edit-module-and-atomic-write.md)),
+this module also owns `atomic_write_part` - the project's first write-path
+plumbing, implementing the atomic-write contract from
+[docs/security-model.md §3](../../docs/security-model.md#3-atomic-write-contract).
+Like everything else here, it has no WordprocessingML knowledge: it rewrites
+one named zip part's bytes, generically, for any future write tool
+(`insert_paragraph`/`delete_paragraph` in Phase 5, `add_footnote`/`edit_footnote`
+in Phase 6) to reuse rather than reimplement.
 """
 
 from __future__ import annotations
 
+import os
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -116,3 +127,66 @@ def parse_xml(raw_xml: bytes, *, part_name: str) -> etree._Element:
         raise InvalidDocumentError(
             f"not a valid .docx file: malformed XML in {part_name}: {exc}"
         ) from exc
+
+
+def atomic_write_part(
+    docx_path: Path,
+    part_name: str,
+    new_content: bytes,
+    *,
+    max_size_bytes: int = MAX_DOCX_SIZE_BYTES,
+) -> None:
+    """Rewrite `docx_path`, replacing `part_name`'s bytes with `new_content`, atomically.
+
+    Implements [docs/security-model.md §3](../../docs/security-model.md#3-atomic-write-contract):
+    the new archive is assembled in a temp file created in `docx_path.parent`
+    (guaranteeing the final rename shares a filesystem/volume with the
+    target), then atomically replaces the original via `os.replace`. The
+    original is only ever touched by that single, final replace - a crash or
+    interruption at any earlier point leaves it byte-for-byte intact, and the
+    stray temp file is best-effort removed.
+
+    Every part other than `part_name` is copied through with its
+    **decompressed content and `zipfile.ZipInfo` metadata** (compression
+    type, timestamp, external attributes) unchanged - not a claim of
+    bit-identical *compressed* byte streams, which would need fragile
+    low-level `zipfile` access; see
+    [ADR-0005](../../docs/adr/0005-phase-4-text-edit-module-and-atomic-write.md)
+    for why this is the guarantee actually made and tested.
+
+    Args:
+        docx_path: Path to the `.docx` file to rewrite. Callers must have
+            already validated this path against the allowed roots (see
+            `docx_mcp.security.resolve_safe_path`); this function does not
+            perform any sandboxing itself.
+        part_name: The internal part to replace (e.g. `word/document.xml`).
+            Must already exist in the archive.
+        new_content: The part's new raw bytes.
+        max_size_bytes: Reject the current on-disk file if it exceeds this,
+            before any temp file is created.
+
+    Raises:
+        InvalidDocumentError: If the file does not exist, exceeds
+            `max_size_bytes`, is not a valid ZIP archive, or does not already
+            contain `part_name`.
+        OSError: If the temp file cannot be created or the final replace
+            fails (e.g. a permissions error); the stray temp file is removed
+            before the exception propagates.
+    """
+    with validate_and_open(docx_path, max_size_bytes=max_size_bytes) as source:
+        read_part(source, part_name)  # validates part_name exists; raises otherwise
+        infos = source.infolist()
+        contents = {info.filename: source.read(info.filename) for info in infos}
+
+    fd, tmp_name = tempfile.mkstemp(dir=docx_path.parent, prefix=".docx-mcp-", suffix=".tmp")
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as out:
+            for info in infos:
+                data = new_content if info.filename == part_name else contents[info.filename]
+                out.writestr(info, data)
+        os.replace(tmp_path, docx_path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise

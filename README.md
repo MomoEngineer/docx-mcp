@@ -64,7 +64,7 @@ The server operates on local file paths passed as tool arguments — the file mu
 | `get_structure` | Read | Document outline: heading hierarchy, table of contents, table summaries, footnote list, and paragraph index. |
 | `get_footnotes` | Read | All footnotes with their ID, anchor location in the text, and content. |
 | `get_metadata` | Read | Core document properties (title, author, created/modified dates, word count). |
-| `find_text` | Read | Search for text or a pattern; returns match locations (paragraph index and context) for use with `replace_text`. |
+| `find_text` | Read | Search for literal text; returns match locations (paragraph index and character offsets) for use with `replace_text`. |
 | `replace_text` | Write | Replace text at a specific location or globally, without corrupting surrounding formatting. |
 | `insert_paragraph` | Write | Insert a new paragraph (body text or heading) at a given position, inheriting the style of its context. |
 | `delete_paragraph` | Write | Remove a paragraph by its index/ID. |

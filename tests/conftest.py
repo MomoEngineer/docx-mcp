@@ -57,6 +57,14 @@ def footnotes_docx(allowed_root: Path) -> Path:
 
 
 @pytest.fixture
+def run_split_docx(allowed_root: Path) -> Path:
+    """A private copy of `tests/fixtures/run_split.docx`, inside `allowed_root`."""
+    destination = allowed_root / "run_split.docx"
+    shutil.copyfile(FIXTURES_DIR / "run_split.docx", destination)
+    return destination
+
+
+@pytest.fixture
 def outside_root(tmp_path: Path) -> Path:
     """A directory that is deliberately *not* an allowed root."""
     outside = tmp_path / "outside"

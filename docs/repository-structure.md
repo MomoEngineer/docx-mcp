@@ -22,7 +22,10 @@ docx-mcp/
 │  └─ adr/
 │     ├─ README.md                # ADR process
 │     ├─ 0001-*.md                # (from Phase 1) OOXML library and module layout
-│     └─ 0002-*.md                # (from Phase 1) dependency/lockfile strategy
+│     ├─ 0002-*.md                # (from Phase 1) dependency/lockfile strategy
+│     ├─ 0003-*.md                # (from Phase 2) module layout: ooxml.py/structure.py/metadata.py
+│     ├─ 0004-*.md                # (from Phase 3) footnotes.py and shared anchor resolution
+│     └─ 0005-*.md                # (from Phase 4) text_edit.py and the atomic-write contract
 ├─ templates/
 │  ├─ tool-spec.md                # per-tool specification template
 │  └─ adr-template.md             # ADR template
@@ -32,23 +35,24 @@ docx-mcp/
 │  ├─ server.py                   #   MCPServer factory + tool registration, as thin wrappers
 │  ├─ config.py                   #   environment-variable configuration (DOCX_MCP_ALLOWED_ROOTS, DOCX_MCP_LOG_LEVEL)
 │  ├─ security.py                 #   path sandboxing (resolve_safe_path)
-│  ├─ ooxml.py                    #   (from Phase 2) generic OOXML/zip plumbing shared by every parsing module
+│  ├─ ooxml.py                    #   (from Phase 2) generic OOXML/zip plumbing shared by every parsing module; (from Phase 4) atomic_write_part
 │  ├─ document.py                 #   OOXML parsing/extraction for read_document; owns WordprocessingML paragraph rendering, reused by structure.py/metadata.py
 │  ├─ structure.py                #   (from Phase 2) get_structure: heading resolution via styles.xml, tables, footnote-anchor index
 │  ├─ metadata.py                 #   (from Phase 2) get_metadata: docProps/core.xml + word count
 │  ├─ footnotes.py                #   (from Phase 3) get_footnotes: word/footnotes.xml content, resolved against document.py's shared anchor index
+│  ├─ text_edit.py                #   (from Phase 4) find_text/replace_text: offset<->XML-node mapping, run-splitting replace algorithm
 │  └─ specs/                      #   per-tool specifications (one file per tool, from templates/tool-spec.md)
 └─ tests/                         # mirrors src/docx_mcp/
    └─ fixtures/                   # small synthetic .docx fixtures — never real personal documents
 ```
 
-> **Phase 0 note (historical):** as of Phase 0, only `README.md`, `CONTRIBUTING.md`, `Roadmap.md`, `docs/`, `templates/`, `.gitignore`, and `.env.example` existed as real content; `src/docx_mcp/`, `tests/`, and `tests/fixtures/` existed as empty folders (kept in git via `.gitkeep`). As of Phase 1 ([ADR-0001](adr/0001-ooxml-library-and-module-layout.md), [ADR-0002](adr/0002-dependency-and-lockfile-strategy.md)), `pyproject.toml` and the module layout above exist for real; the `.gitkeep` placeholders are gone. As of Phase 2 ([ADR-0003](adr/0003-phase-2-module-layout.md)), `document.py` is split: `ooxml.py` holds the generic zip/hardened-parser plumbing every parsing module shares, and `structure.py`/`metadata.py` are new tool-logic modules that reuse `document.py`'s paragraph-rendering helpers rather than duplicating them. As of Phase 3 ([ADR-0004](adr/0004-phase-3-footnote-module-and-shared-anchor-resolution.md)), `footnotes.py` is a new tool-logic module for `get_footnotes`; the footnote-anchor-finding loop `structure.py` previously implemented inline moved into `document.py` as a shared, presentation-agnostic helper (`find_footnote_anchors`), reused by both `structure.py` and `footnotes.py` so the two tools cannot disagree on which paragraph anchors which footnote id.
+> **Phase 0 note (historical):** as of Phase 0, only `README.md`, `CONTRIBUTING.md`, `Roadmap.md`, `docs/`, `templates/`, `.gitignore`, and `.env.example` existed as real content; `src/docx_mcp/`, `tests/`, and `tests/fixtures/` existed as empty folders (kept in git via `.gitkeep`). As of Phase 1 ([ADR-0001](adr/0001-ooxml-library-and-module-layout.md), [ADR-0002](adr/0002-dependency-and-lockfile-strategy.md)), `pyproject.toml` and the module layout above exist for real; the `.gitkeep` placeholders are gone. As of Phase 2 ([ADR-0003](adr/0003-phase-2-module-layout.md)), `document.py` is split: `ooxml.py` holds the generic zip/hardened-parser plumbing every parsing module shares, and `structure.py`/`metadata.py` are new tool-logic modules that reuse `document.py`'s paragraph-rendering helpers rather than duplicating them. As of Phase 3 ([ADR-0004](adr/0004-phase-3-footnote-module-and-shared-anchor-resolution.md)), `footnotes.py` is a new tool-logic module for `get_footnotes`; the footnote-anchor-finding loop `structure.py` previously implemented inline moved into `document.py` as a shared, presentation-agnostic helper (`find_footnote_anchors`), reused by both `structure.py` and `footnotes.py` so the two tools cannot disagree on which paragraph anchors which footnote id. As of Phase 4 ([ADR-0005](adr/0005-phase-4-text-edit-module-and-atomic-write.md)), `text_edit.py` is a new tool-logic module owning **both** `find_text` and `replace_text` (a deliberate, phase-scoped exception to the one-module-per-tool convention below, since the two tools share one offset-addressing contract); `ooxml.py` gains `atomic_write_part`, the project's first write-path plumbing, reused by every write tool from this phase onward.
 
 ---
 
 ## 2. Conventions
 
-- **Tool logic = one module** under `src/docx_mcp/`; `server.py` registers tools as **thin wrappers**, consistent with `research-graphrag`'s convention that the server module itself carries no business logic.
+- **Tool logic = one module** under `src/docx_mcp/`; `server.py` registers tools as **thin wrappers**, consistent with `research-graphrag`'s convention that the server module itself carries no business logic. `text_edit.py` (Phase 4) is a documented exception covering **one closely-coupled tool pair** (`find_text`/`replace_text`) rather than one tool — see [ADR-0005](adr/0005-phase-4-text-edit-module-and-atomic-write.md); it is not a precedent for merging unrelated tools into one module.
 - **Tool contracts** are checked via an in-memory MCP client, exercising the real protocol (name, description, input schema, version) against the tool spec.
 - **One tool = one specification** under `src/docx_mcp/specs/<tool>.md`.
 - The submodule layout of `src/docx_mcp/` shown above was decided by [ADR-0001](adr/0001-ooxml-library-and-module-layout.md) once Phase 1's real parsing need existed (left open in Phase 0 on purpose); `document.py` stays a single module until a second read path (Phase 2/3) would otherwise duplicate logic against it.

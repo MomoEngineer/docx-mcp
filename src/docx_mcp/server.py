@@ -20,6 +20,8 @@ from docx_mcp.footnotes import get_document_footnotes
 from docx_mcp.metadata import get_document_metadata
 from docx_mcp.security import PathAccessError, resolve_safe_path
 from docx_mcp.structure import get_document_structure
+from docx_mcp.text_edit import TextEditError, find_text_matches, replace_text_in_document
+from docx_mcp.text_edit import TextLocation as _TextLocation
 
 READ_DOCUMENT_TOOL_VERSION = "1.0.0"
 """Semantic version of `read_document`, per
@@ -35,6 +37,12 @@ GET_METADATA_TOOL_VERSION = "1.0.0"
 
 GET_FOOTNOTES_TOOL_VERSION = "1.0.0"
 """Semantic version of `get_footnotes` (see `docs/documentation-standards.md` §4.1)."""
+
+FIND_TEXT_TOOL_VERSION = "1.0.0"
+"""Semantic version of `find_text` (see `docs/documentation-standards.md` §4.1)."""
+
+REPLACE_TEXT_TOOL_VERSION = "1.0.0"
+"""Semantic version of `replace_text` (see `docs/documentation-standards.md` §4.1)."""
 
 
 class ReadDocumentResult(BaseModel):
@@ -333,6 +341,172 @@ def get_footnotes(path: str) -> GetFootnotesResult:
     )
 
 
+class TextLocation(BaseModel):
+    """A half-open character span in one top-level body paragraph's plain
+    text - `find_text`'s match location and `replace_text`'s input, sharing
+    one shape (see `specs/find_text.md` §3, `specs/replace_text.md` §2)."""
+
+    paragraph_index: int = Field(description="0-based position among top-level body paragraphs.")
+    start_offset: int = Field(description="Start offset (inclusive) into the paragraph's text.")
+    end_offset: int = Field(description="End offset (exclusive) into the paragraph's text.")
+
+
+class TextMatch(BaseModel):
+    """One `find_text` match (see `specs/find_text.md` §3)."""
+
+    location: TextLocation = Field(description="Where the match was found.")
+    matched_text: str = Field(description="The actual substring found, in its original casing.")
+    paragraph_text: str = Field(description="The full plain text of the matched paragraph.")
+
+
+class FindTextResult(BaseModel):
+    """Output of `find_text` (see `specs/find_text.md` §3, Output Schema)."""
+
+    matches: list[TextMatch] = Field(
+        description="Every non-overlapping match, in document order. Empty if none found."
+    )
+
+
+def find_text(path: str, search_text: str, case_sensitive: bool = True) -> FindTextResult:
+    """Search a .docx file's body for literal text, returning locations replace_text can act on.
+
+    Finds every non-overlapping, literal (non-regex) occurrence of
+    search_text across top-level body paragraphs, even when Word has split
+    the matched text across multiple internal runs. Each match's location
+    (paragraph_index, start_offset, end_offset) is a half-open span into
+    that paragraph's plain text (no heading '#'/footnote '[^N]' markers) and
+    can be passed directly as replace_text's location argument. See
+    specs/find_text.md for the full specification, including why regex,
+    table-cell text, and cross-paragraph matches are out of scope.
+
+    Args:
+        path: Filesystem path to a `.docx` file, absolute or relative. Must
+            resolve inside one of the roots configured via
+            `DOCX_MCP_ALLOWED_ROOTS`; an empty/unset allow-list denies every
+            path.
+        search_text: The literal text to search for. Must be non-empty.
+        case_sensitive: `True` (default) for exact-case matching only;
+            `False` for Unicode-aware case-insensitive matching (matched_text
+            still reflects the text's actual, original casing).
+
+    Returns:
+        A `FindTextResult` carrying every match, in document order.
+
+    Raises:
+        ToolError: If `path` escapes the allowed roots, the file does not
+            exist, the file is not a valid `.docx` document, or `search_text`
+            is empty.
+    """
+    config = load_config()
+    try:
+        safe_path = resolve_safe_path(path, config.allowed_roots)
+    except PathAccessError as exc:
+        raise ToolError(str(exc)) from exc
+
+    try:
+        matches = find_text_matches(safe_path, search_text, case_sensitive=case_sensitive)
+    except (InvalidDocumentError, TextEditError) as exc:
+        raise ToolError(str(exc)) from exc
+
+    return FindTextResult(
+        matches=[
+            TextMatch(
+                location=TextLocation(
+                    paragraph_index=m.location.paragraph_index,
+                    start_offset=m.location.start_offset,
+                    end_offset=m.location.end_offset,
+                ),
+                matched_text=m.matched_text,
+                paragraph_text=m.paragraph_text,
+            )
+            for m in matches
+        ]
+    )
+
+
+class ReplaceTextResult(BaseModel):
+    """Output of `replace_text` (see `specs/replace_text.md` §3, Output Schema)."""
+
+    replacements_made: int = Field(
+        description=(
+            "Number of occurrences replaced: always 1 in location mode, always >= 1 "
+            "in global mode (zero matches in global mode is an error, not a 0 result)."
+        )
+    )
+
+
+def replace_text(
+    path: str,
+    search_text: str,
+    replacement_text: str,
+    location: TextLocation | None = None,
+    case_sensitive: bool = True,
+) -> ReplaceTextResult:
+    """Replace literal text in a .docx file, at one location or everywhere, formatting-safely.
+
+    Without location, replaces every occurrence of search_text in the
+    document. With location (as returned by find_text), replaces exactly
+    that one occurrence - but first re-verifies the document still contains
+    search_text there, failing with a clear "stale location" error if it
+    does not, so a caller can never silently edit the wrong text because the
+    document changed since find_text was called. A boundary run's untouched
+    prefix/suffix text keeps its original formatting; the replacement text
+    inherits the leftmost matched run's formatting. The write is atomic (see
+    docs/security-model.md §3): the original file is only ever touched by a
+    single, final replace step. See specs/replace_text.md for the full
+    specification, including why regex, table-cell text, cross-paragraph
+    matches, and a match spanning a hyperlink/tracked-change boundary are
+    out of scope or rejected.
+
+    Args:
+        path: Filesystem path to a `.docx` file, absolute or relative. Must
+            resolve inside one of the roots configured via
+            `DOCX_MCP_ALLOWED_ROOTS`; an empty/unset allow-list denies every
+            path.
+        search_text: The literal text to replace. Must be non-empty; in
+            location mode, also the value re-verified against `location`.
+        replacement_text: The literal replacement text; may be empty (a
+            pure deletion).
+        location: `None` (default) replaces every occurrence. Given (as
+            returned by `find_text`), replaces exactly that one occurrence.
+        case_sensitive: `True` (default) for exact-case matching/verification;
+            `False` for Unicode-aware case-insensitive matching.
+
+    Returns:
+        A `ReplaceTextResult` carrying the number of occurrences replaced.
+
+    Raises:
+        ToolError: If `path` escapes the allowed roots, the file does not
+            exist or is not a valid `.docx` document, `search_text` is
+            empty, `location` is invalid or stale, no occurrences are found
+            in global mode, or a match spans a run-container boundary.
+    """
+    config = load_config()
+    try:
+        safe_path = resolve_safe_path(path, config.allowed_roots)
+    except PathAccessError as exc:
+        raise ToolError(str(exc)) from exc
+
+    internal_location = (
+        _TextLocation(location.paragraph_index, location.start_offset, location.end_offset)
+        if location is not None
+        else None
+    )
+
+    try:
+        replacements_made = replace_text_in_document(
+            safe_path,
+            search_text,
+            replacement_text,
+            location=internal_location,
+            case_sensitive=case_sensitive,
+        )
+    except (InvalidDocumentError, TextEditError) as exc:
+        raise ToolError(str(exc)) from exc
+
+    return ReplaceTextResult(replacements_made=replacements_made)
+
+
 def create_server(config: ServerConfig | None = None) -> MCPServer:
     """Build the docx-mcp `MCPServer`, with its process-wide log level applied.
 
@@ -345,9 +519,9 @@ def create_server(config: ServerConfig | None = None) -> MCPServer:
 
     Returns:
         An `MCPServer` with `read_document`, `get_structure`, `get_metadata`,
-        and `get_footnotes` registered, and logging configured at
-        `config.log_level` (see `docs/documentation-standards.md` §6,
-        Logging and observability).
+        `get_footnotes`, `find_text`, and `replace_text` registered, and
+        logging configured at `config.log_level` (see
+        `docs/documentation-standards.md` §6, Logging and observability).
     """
     resolved_config = config if config is not None else load_config()
     server = MCPServer(name="docx-mcp", version=__version__, log_level=resolved_config.log_level)
@@ -355,6 +529,8 @@ def create_server(config: ServerConfig | None = None) -> MCPServer:
     server.add_tool(get_structure, meta={"docx_mcp.tool_version": GET_STRUCTURE_TOOL_VERSION})
     server.add_tool(get_metadata, meta={"docx_mcp.tool_version": GET_METADATA_TOOL_VERSION})
     server.add_tool(get_footnotes, meta={"docx_mcp.tool_version": GET_FOOTNOTES_TOOL_VERSION})
+    server.add_tool(find_text, meta={"docx_mcp.tool_version": FIND_TEXT_TOOL_VERSION})
+    server.add_tool(replace_text, meta={"docx_mcp.tool_version": REPLACE_TEXT_TOOL_VERSION})
     return server
 
 
