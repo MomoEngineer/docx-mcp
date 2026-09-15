@@ -18,6 +18,11 @@ from docx_mcp.config import ServerConfig, load_config
 from docx_mcp.document import InvalidDocumentError, extract_text
 from docx_mcp.footnotes import get_document_footnotes
 from docx_mcp.metadata import get_document_metadata
+from docx_mcp.paragraph_edit import (
+    ParagraphEditError,
+    delete_paragraph_from_document,
+    insert_paragraph_in_document,
+)
 from docx_mcp.security import PathAccessError, resolve_safe_path
 from docx_mcp.structure import get_document_structure
 from docx_mcp.text_edit import TextEditError, find_text_matches, replace_text_in_document
@@ -43,6 +48,12 @@ FIND_TEXT_TOOL_VERSION = "1.0.0"
 
 REPLACE_TEXT_TOOL_VERSION = "1.0.0"
 """Semantic version of `replace_text` (see `docs/documentation-standards.md` §4.1)."""
+
+INSERT_PARAGRAPH_TOOL_VERSION = "1.0.0"
+"""Semantic version of `insert_paragraph` (see `docs/documentation-standards.md` §4.1)."""
+
+DELETE_PARAGRAPH_TOOL_VERSION = "1.0.0"
+"""Semantic version of `delete_paragraph` (see `docs/documentation-standards.md` §4.1)."""
 
 
 class ReadDocumentResult(BaseModel):
@@ -507,6 +518,140 @@ def replace_text(
     return ReplaceTextResult(replacements_made=replacements_made)
 
 
+class InsertParagraphResult(BaseModel):
+    """Output of `insert_paragraph` (see `specs/insert_paragraph.md` §3, Output Schema)."""
+
+    paragraph_index: int = Field(
+        description=(
+            "0-based index the newly inserted paragraph now occupies among the "
+            "document's top-level paragraphs."
+        )
+    )
+
+
+def insert_paragraph(
+    path: str,
+    text: str,
+    after_paragraph_index: int | None = None,
+    heading_level: int | None = None,
+) -> InsertParagraphResult:
+    """Insert a new paragraph - body text, or a heading at an explicit level - into a .docx file.
+
+    Without after_paragraph_index, inserts at the very start of the
+    document's body. With after_paragraph_index (0-based, same indexing as
+    get_structure/find_text/replace_text), inserts immediately after that
+    paragraph - to append at the end, pass the index of the current last
+    paragraph. Without heading_level, the new paragraph is plain body text
+    that inherits the local formatting (style, indentation, spacing, list
+    membership) of the paragraph it is inserted next to - but never that
+    neighbor's section-break marker (if any), and not at all if that
+    neighbor is itself a heading, so the new paragraph never silently
+    becomes a second heading or an unintended extra section break. With
+    heading_level (1-9), the new paragraph becomes a heading at that level
+    (Word's built-in HeadingN style), independent of its neighbor's
+    formatting. See specs/insert_paragraph.md for the full specification,
+    including why a Word table-of-contents field is not recomputed and why
+    a custom-named heading style is not recognized as a heading by the
+    inheritance rule.
+
+    Args:
+        path: Filesystem path to a `.docx` file, absolute or relative. Must
+            resolve inside one of the roots configured via
+            `DOCX_MCP_ALLOWED_ROOTS`; an empty/unset allow-list denies every
+            path.
+        text: The new paragraph's plain text content. May be empty.
+        after_paragraph_index: `None` (default) inserts at the very start.
+            Given, inserts immediately after that existing paragraph.
+        heading_level: `None` (default) for plain body text. `1`-`9` to make
+            the new paragraph a heading at that level.
+
+    Returns:
+        An `InsertParagraphResult` carrying the new paragraph's index.
+
+    Raises:
+        ToolError: If `path` escapes the allowed roots, the file does not
+            exist or is not a valid `.docx` document, `after_paragraph_index`
+            does not reference an existing paragraph, or `heading_level` is
+            not in `1..9`.
+    """
+    config = load_config()
+    try:
+        safe_path = resolve_safe_path(path, config.allowed_roots)
+    except PathAccessError as exc:
+        raise ToolError(str(exc)) from exc
+
+    try:
+        new_index = insert_paragraph_in_document(
+            safe_path,
+            text,
+            after_paragraph_index=after_paragraph_index,
+            heading_level=heading_level,
+        )
+    except (InvalidDocumentError, ParagraphEditError) as exc:
+        raise ToolError(str(exc)) from exc
+
+    return InsertParagraphResult(paragraph_index=new_index)
+
+
+class DeleteParagraphResult(BaseModel):
+    """Output of `delete_paragraph` (see `specs/delete_paragraph.md` §3, Output Schema)."""
+
+    deleted_text: str = Field(
+        description="The removed paragraph's plain text, as it was immediately before deletion."
+    )
+
+
+def delete_paragraph(
+    path: str, paragraph_index: int, expected_text: str | None = None
+) -> DeleteParagraphResult:
+    """Remove a paragraph from a .docx file's body by its paragraph_index.
+
+    If expected_text is given, it must equal the target paragraph's current
+    plain text exactly, or the call fails with a clear "stale
+    paragraph_index" error instead of deleting - the same staleness check
+    replace_text's location/search_text pair performs, applied to whole-
+    paragraph deletion, which cannot otherwise be undone by insert_paragraph
+    alone. A paragraph that carries the document's section properties
+    (w:sectPr) cannot be deleted. A footnote reference inside the deleted
+    paragraph is removed along with it, but the corresponding
+    word/footnotes.xml entry is deliberately left in place, unreferenced -
+    see specs/delete_paragraph.md for the full specification and rationale.
+
+    Args:
+        path: Filesystem path to a `.docx` file, absolute or relative. Must
+            resolve inside one of the roots configured via
+            `DOCX_MCP_ALLOWED_ROOTS`; an empty/unset allow-list denies every
+            path.
+        paragraph_index: 0-based index of the paragraph to remove.
+        expected_text: `None` (default) skips the staleness check. Given,
+            must match the target paragraph's current plain text exactly.
+
+    Returns:
+        A `DeleteParagraphResult` carrying the removed paragraph's text.
+
+    Raises:
+        ToolError: If `path` escapes the allowed roots, the file does not
+            exist or is not a valid `.docx` document, `paragraph_index` does
+            not reference an existing paragraph, `expected_text` is given
+            and does not match, or the target paragraph carries the
+            document's section properties.
+    """
+    config = load_config()
+    try:
+        safe_path = resolve_safe_path(path, config.allowed_roots)
+    except PathAccessError as exc:
+        raise ToolError(str(exc)) from exc
+
+    try:
+        deleted_text = delete_paragraph_from_document(
+            safe_path, paragraph_index, expected_text=expected_text
+        )
+    except (InvalidDocumentError, ParagraphEditError) as exc:
+        raise ToolError(str(exc)) from exc
+
+    return DeleteParagraphResult(deleted_text=deleted_text)
+
+
 def create_server(config: ServerConfig | None = None) -> MCPServer:
     """Build the docx-mcp `MCPServer`, with its process-wide log level applied.
 
@@ -519,9 +664,10 @@ def create_server(config: ServerConfig | None = None) -> MCPServer:
 
     Returns:
         An `MCPServer` with `read_document`, `get_structure`, `get_metadata`,
-        `get_footnotes`, `find_text`, and `replace_text` registered, and
-        logging configured at `config.log_level` (see
-        `docs/documentation-standards.md` §6, Logging and observability).
+        `get_footnotes`, `find_text`, `replace_text`, `insert_paragraph`, and
+        `delete_paragraph` registered, and logging configured at
+        `config.log_level` (see `docs/documentation-standards.md` §6,
+        Logging and observability).
     """
     resolved_config = config if config is not None else load_config()
     server = MCPServer(name="docx-mcp", version=__version__, log_level=resolved_config.log_level)
@@ -531,6 +677,8 @@ def create_server(config: ServerConfig | None = None) -> MCPServer:
     server.add_tool(get_footnotes, meta={"docx_mcp.tool_version": GET_FOOTNOTES_TOOL_VERSION})
     server.add_tool(find_text, meta={"docx_mcp.tool_version": FIND_TEXT_TOOL_VERSION})
     server.add_tool(replace_text, meta={"docx_mcp.tool_version": REPLACE_TEXT_TOOL_VERSION})
+    server.add_tool(insert_paragraph, meta={"docx_mcp.tool_version": INSERT_PARAGRAPH_TOOL_VERSION})
+    server.add_tool(delete_paragraph, meta={"docx_mcp.tool_version": DELETE_PARAGRAPH_TOOL_VERSION})
     return server
 
 

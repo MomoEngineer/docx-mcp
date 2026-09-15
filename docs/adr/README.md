@@ -45,9 +45,10 @@ An ADR is created for, among others:
 | [0003](0003-phase-2-module-layout.md) | Phase 2 Module Layout: Splitting `document.py` | Accepted |
 | [0004](0004-phase-3-footnote-module-and-shared-anchor-resolution.md) | Phase 3 Module Layout: `footnotes.py` and Shared Footnote-Anchor Resolution | Accepted |
 | [0005](0005-phase-4-text-edit-module-and-atomic-write.md) | Phase 4 Module Layout: `text_edit.py` and the Atomic-Write Contract | Accepted |
+| [0006](0006-phase-5-paragraph-edit-module-layout.md) | Phase 5 Module Layout: `paragraph_edit.py` and Style-Inheritance Rules for `insert_paragraph`/`delete_paragraph` | Accepted |
 
 ---
 
 ## 5. Open/planned ADRs
 
-- None currently open. The five ADRs required so far (OOXML library, dependency/lockfile strategy, Phase 2 module layout, Phase 3 module layout, Phase 4 module layout and atomic-write contract) are decided above. Phase 5/6 will each need their own module-layout ADR, per [ADR-0005](0005-phase-4-text-edit-module-and-atomic-write.md)'s follow-up note.
+- None currently open. The six ADRs required so far (OOXML library, dependency/lockfile strategy, Phase 2 module layout, Phase 3 module layout, Phase 4 module layout and atomic-write contract, Phase 5 module layout and style-inheritance rules) are decided above. Phase 6 will need its own module-layout ADR, per [ADR-0005](0005-phase-4-text-edit-module-and-atomic-write.md)'s follow-up note.

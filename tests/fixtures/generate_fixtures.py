@@ -24,6 +24,8 @@ from pathlib import Path
 
 from docx import Document
 from docx.enum.style import WD_STYLE_TYPE
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Pt
 from lxml import etree
 
 FIXTURES_DIR = Path(__file__).parent
@@ -391,6 +393,53 @@ def generate_run_split_docx() -> Path:
     return output_path
 
 
+def generate_paragraph_edits_docx() -> Path:
+    """Build `tests/fixtures/paragraph_edits.docx` for `insert_paragraph`/
+    `delete_paragraph` (Phase 5).
+
+    Pure `python-docx`, no raw-XML surgery needed - none of this fixture's
+    cases (heading-as-anchor, non-default local paragraph formatting, end-
+    of-document) need an API `python-docx` lacks. The section-properties
+    guard and the numbered-list-inheritance case are deliberately *not*
+    covered here: both need a specific, hand-crafted `w:pPr` element
+    (`w:sectPr`, `w:numPr`) that is simplest to build as a small synthetic
+    per-test document, following `tests/test_text_edit.py`'s established
+    convention for this kind of edge case - see
+    [ADR-0006](../../docs/adr/0006-phase-5-paragraph-edit-module-layout.md).
+
+    Expected `get_structure`/`read_document` paragraph layout (see
+    `tests/test_paragraph_edit.py`, `tests/test_insert_paragraph_tool.py`,
+    `tests/test_delete_paragraph_tool.py`):
+
+        paragraphs[0] = "Introduction"            (Heading1)
+        paragraphs[1] = "First body paragraph."    (Normal, centered, left-indented by 36pt -
+                                                     non-default local w:pPr overrides, to prove
+                                                     verbatim-copy inheritance, not just a shared
+                                                     style id)
+        paragraphs[2] = "Details"                  (Heading2)
+        paragraphs[3] = "Second body paragraph."   (Normal, default formatting)
+        paragraphs[4] = "Last paragraph."          (Normal, default formatting - the current last
+                                                     paragraph; python-docx stores this single
+                                                     section's w:sectPr as w:body's own direct last
+                                                     child, never inside this paragraph's w:pPr, so
+                                                     deleting it is a normal, unguarded case)
+    """
+    document = Document()
+    document.add_heading("Introduction", level=1)
+
+    formatted_paragraph = document.add_paragraph("First body paragraph.")
+    formatted_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    formatted_paragraph.paragraph_format.left_indent = Pt(36)
+
+    document.add_heading("Details", level=2)
+    document.add_paragraph("Second body paragraph.")
+    document.add_paragraph("Last paragraph.")
+
+    output_path = FIXTURES_DIR / "paragraph_edits.docx"
+    document.save(output_path)
+    return output_path
+
+
 if __name__ == "__main__":
     shutil.rmtree(FIXTURES_DIR / "__pycache__", ignore_errors=True)
     minimal_path = generate_minimal_docx()
@@ -401,3 +450,5 @@ if __name__ == "__main__":
     print(f"wrote {footnotes_path}")
     run_split_path = generate_run_split_docx()
     print(f"wrote {run_split_path}")
+    paragraph_edits_path = generate_paragraph_edits_docx()
+    print(f"wrote {paragraph_edits_path}")
