@@ -16,6 +16,11 @@ from pydantic import BaseModel, Field
 from docx_mcp import __version__
 from docx_mcp.config import ServerConfig, load_config
 from docx_mcp.document import InvalidDocumentError, extract_text
+from docx_mcp.footnote_edit import (
+    FootnoteEditError,
+    add_footnote_to_document,
+    edit_footnote_in_document,
+)
 from docx_mcp.footnotes import get_document_footnotes
 from docx_mcp.metadata import get_document_metadata
 from docx_mcp.paragraph_edit import (
@@ -54,6 +59,12 @@ INSERT_PARAGRAPH_TOOL_VERSION = "1.0.0"
 
 DELETE_PARAGRAPH_TOOL_VERSION = "1.0.0"
 """Semantic version of `delete_paragraph` (see `docs/documentation-standards.md` §4.1)."""
+
+ADD_FOOTNOTE_TOOL_VERSION = "1.0.0"
+"""Semantic version of `add_footnote` (see `docs/documentation-standards.md` §4.1)."""
+
+EDIT_FOOTNOTE_TOOL_VERSION = "1.0.0"
+"""Semantic version of `edit_footnote` (see `docs/documentation-standards.md` §4.1)."""
 
 
 class ReadDocumentResult(BaseModel):
@@ -652,6 +663,127 @@ def delete_paragraph(
     return DeleteParagraphResult(deleted_text=deleted_text)
 
 
+class AddFootnoteResult(BaseModel):
+    """Output of `add_footnote` (see `specs/add_footnote.md` §3, Output Schema)."""
+
+    footnote_id: str = Field(
+        description=(
+            "The new footnote's w:id, as a string - always server-allocated, never "
+            "derived from content or caller-supplied."
+        )
+    )
+
+
+def add_footnote(path: str, paragraph_index: int, content: str) -> AddFootnoteResult:
+    """Attach a new footnote to a paragraph in a .docx file's body.
+
+    The new footnote reference is always appended at the end of
+    paragraph_index's text - there is no parameter to place it mid-sentence
+    at a specific character offset, since no read tool in this project
+    (including get_footnotes) reports a footnote anchor more precisely than
+    paragraph_index. content becomes the footnote's text in word/footnotes.xml;
+    a "\\n" inside it starts a new paragraph within the footnote. If the
+    document has no footnotes yet, word/footnotes.xml is created from scratch
+    together with the [Content_Types].xml and word/_rels/document.xml.rels
+    entries that wire it into the package - all in one atomic write. See
+    specs/add_footnote.md for the full specification.
+
+    Args:
+        path: Filesystem path to a `.docx` file, absolute or relative. Must
+            resolve inside one of the roots configured via
+            `DOCX_MCP_ALLOWED_ROOTS`; an empty/unset allow-list denies every
+            path.
+        paragraph_index: 0-based index, among top-level body paragraphs, of
+            the paragraph the new footnote is attached to.
+        content: The new footnote's text content. May be empty. A "\\n"
+            inside it starts a new paragraph within the footnote.
+
+    Returns:
+        An `AddFootnoteResult` carrying the new footnote's id.
+
+    Raises:
+        ToolError: If `path` escapes the allowed roots, the file does not
+            exist or is not a valid `.docx` document, `paragraph_index` does
+            not reference an existing paragraph, `word/footnotes.xml` is
+            malformed, or `word/footnotes.xml` is absent and
+            `[Content_Types].xml` is also missing.
+    """
+    config = load_config()
+    try:
+        safe_path = resolve_safe_path(path, config.allowed_roots)
+    except PathAccessError as exc:
+        raise ToolError(str(exc)) from exc
+
+    try:
+        footnote_id = add_footnote_to_document(safe_path, paragraph_index, content)
+    except (InvalidDocumentError, FootnoteEditError) as exc:
+        raise ToolError(str(exc)) from exc
+
+    return AddFootnoteResult(footnote_id=footnote_id)
+
+
+class EditFootnoteResult(BaseModel):
+    """Output of `edit_footnote` (see `specs/edit_footnote.md` §3, Output Schema)."""
+
+    previous_content: str = Field(
+        description="The footnote's content exactly as it was immediately before this call."
+    )
+
+
+def edit_footnote(
+    path: str, footnote_id: str, content: str, expected_content: str | None = None
+) -> EditFootnoteResult:
+    """Update an existing footnote's content in a .docx file, by its id.
+
+    Rebuilds the target footnote's content entirely fresh from content -
+    any existing run/paragraph-level formatting inside the footnote is
+    discarded, not preserved. content.split("\\n") becomes one paragraph per
+    line, the exact inverse of get_footnotes' content-reading convention, so
+    a round-trip through get_footnotes reproduces content verbatim. Neither
+    the footnote's anchor in word/document.xml nor its id are touched.
+    footnote_id must not be "-1" or "0" (Word's reserved boilerplate
+    separator/continuationSeparator footnotes, never exposed by
+    get_footnotes). See specs/edit_footnote.md for the full specification.
+
+    Args:
+        path: Filesystem path to a `.docx` file, absolute or relative. Must
+            resolve inside one of the roots configured via
+            `DOCX_MCP_ALLOWED_ROOTS`; an empty/unset allow-list denies every
+            path.
+        footnote_id: The w:id of the footnote to edit, as reported by
+            get_footnotes/get_structure/add_footnote.
+        content: The footnote's new text content. May be empty.
+        expected_content: `None` (default) skips the staleness check. Given,
+            must equal the footnote's current content (as get_footnotes
+            would report it) exactly, or the call fails as stale.
+
+    Returns:
+        An `EditFootnoteResult` carrying the footnote's content as it was
+        immediately before this call.
+
+    Raises:
+        ToolError: If `path` escapes the allowed roots, the file does not
+            exist or is not a valid `.docx` document, `footnote_id` is
+            `"-1"`/`"0"`, `word/footnotes.xml` is absent or malformed,
+            `footnote_id` is not declared in it, or `expected_content` is
+            given and does not match.
+    """
+    config = load_config()
+    try:
+        safe_path = resolve_safe_path(path, config.allowed_roots)
+    except PathAccessError as exc:
+        raise ToolError(str(exc)) from exc
+
+    try:
+        previous_content = edit_footnote_in_document(
+            safe_path, footnote_id, content, expected_content=expected_content
+        )
+    except (InvalidDocumentError, FootnoteEditError) as exc:
+        raise ToolError(str(exc)) from exc
+
+    return EditFootnoteResult(previous_content=previous_content)
+
+
 def create_server(config: ServerConfig | None = None) -> MCPServer:
     """Build the docx-mcp `MCPServer`, with its process-wide log level applied.
 
@@ -664,10 +796,10 @@ def create_server(config: ServerConfig | None = None) -> MCPServer:
 
     Returns:
         An `MCPServer` with `read_document`, `get_structure`, `get_metadata`,
-        `get_footnotes`, `find_text`, `replace_text`, `insert_paragraph`, and
-        `delete_paragraph` registered, and logging configured at
-        `config.log_level` (see `docs/documentation-standards.md` §6,
-        Logging and observability).
+        `get_footnotes`, `find_text`, `replace_text`, `insert_paragraph`,
+        `delete_paragraph`, `add_footnote`, and `edit_footnote` registered,
+        and logging configured at `config.log_level` (see
+        `docs/documentation-standards.md` §6, Logging and observability).
     """
     resolved_config = config if config is not None else load_config()
     server = MCPServer(name="docx-mcp", version=__version__, log_level=resolved_config.log_level)
@@ -679,6 +811,8 @@ def create_server(config: ServerConfig | None = None) -> MCPServer:
     server.add_tool(replace_text, meta={"docx_mcp.tool_version": REPLACE_TEXT_TOOL_VERSION})
     server.add_tool(insert_paragraph, meta={"docx_mcp.tool_version": INSERT_PARAGRAPH_TOOL_VERSION})
     server.add_tool(delete_paragraph, meta={"docx_mcp.tool_version": DELETE_PARAGRAPH_TOOL_VERSION})
+    server.add_tool(add_footnote, meta={"docx_mcp.tool_version": ADD_FOOTNOTE_TOOL_VERSION})
+    server.add_tool(edit_footnote, meta={"docx_mcp.tool_version": EDIT_FOOTNOTE_TOOL_VERSION})
     return server
 
 

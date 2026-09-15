@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from docx_mcp import ooxml
-from docx_mcp.ooxml import InvalidDocumentError, atomic_write_part
+from docx_mcp.ooxml import InvalidDocumentError, atomic_write_part, atomic_write_parts
 
 
 def _write_zip(path: Path, parts: dict[str, bytes]) -> None:
@@ -132,6 +132,130 @@ def test_simulated_crash_before_replace_leaves_original_byte_for_byte_intact(
 
     with pytest.raises(OSError, match="simulated crash"):
         atomic_write_part(sample_docx, "word/document.xml", b"<edited/>")
+
+    assert sample_docx.read_bytes() == original_bytes
+    leftover = [p for p in sample_docx.parent.iterdir() if p.name.startswith(".docx-mcp-")]
+    assert leftover == []
+
+
+# --- atomic_write_parts: multi-part atomic write (Phase 6, ADR-0007) -----------
+#
+# `atomic_write_part` (above) keeps its existing "the part must already
+# exist" validation and its existing tests completely unchanged.
+# `atomic_write_parts` is a separate, more permissive entry point - added for
+# `add_footnote`, which must add a brand new `word/footnotes.xml` (plus
+# `[Content_Types].xml`/`.rels` updates) in the same atomic step as editing
+# `word/document.xml` - mirroring this module's existing `read_part`/
+# `read_optional_part` strict-vs-permissive split, now for writes.
+
+
+def test_parts_existing_part_is_replaced(sample_docx: Path) -> None:
+    atomic_write_parts(sample_docx, {"word/document.xml": b"<edited/>"})
+
+    with zipfile.ZipFile(sample_docx) as archive:
+        assert archive.read("word/document.xml") == b"<edited/>"
+
+
+def test_parts_new_part_is_added_when_absent(sample_docx: Path) -> None:
+    atomic_write_parts(sample_docx, {"word/footnotes.xml": b"<footnotes/>"})
+
+    with zipfile.ZipFile(sample_docx) as archive:
+        assert archive.read("word/footnotes.xml") == b"<footnotes/>"
+        assert archive.read("word/document.xml") == b"<original/>"
+
+
+def test_parts_multiple_parts_written_together_one_new_one_existing(sample_docx: Path) -> None:
+    atomic_write_parts(
+        sample_docx,
+        {
+            "word/document.xml": b"<edited/>",
+            "word/footnotes.xml": b"<footnotes/>",
+        },
+    )
+
+    with zipfile.ZipFile(sample_docx) as archive:
+        assert archive.read("word/document.xml") == b"<edited/>"
+        assert archive.read("word/footnotes.xml") == b"<footnotes/>"
+        assert archive.read("word/styles.xml") == b"<styles/>"
+
+
+def test_parts_untouched_parts_keep_identical_content_and_metadata(sample_docx: Path) -> None:
+    with zipfile.ZipFile(sample_docx) as archive:
+        before_info = archive.getinfo("word/styles.xml")
+        before = {
+            "content": archive.read("word/styles.xml"),
+            "compress_type": before_info.compress_type,
+            "date_time": before_info.date_time,
+            "external_attr": before_info.external_attr,
+        }
+
+    atomic_write_parts(sample_docx, {"word/footnotes.xml": b"<footnotes/>"})
+
+    with zipfile.ZipFile(sample_docx) as archive:
+        after_info = archive.getinfo("word/styles.xml")
+        assert archive.read("word/styles.xml") == before["content"]
+        assert after_info.compress_type == before["compress_type"]
+        assert after_info.date_time == before["date_time"]
+        assert after_info.external_attr == before["external_attr"]
+
+
+def test_parts_existing_entries_keep_their_order_new_entries_appended(sample_docx: Path) -> None:
+    with zipfile.ZipFile(sample_docx) as archive:
+        names_before = archive.namelist()
+
+    atomic_write_parts(
+        sample_docx,
+        {
+            "word/footnotes.xml": b"<footnotes/>",
+            "[Content_Types].xml": b"<types-edited/>",
+            "word/_rels/document.xml.rels": b"<rels/>",
+        },
+    )
+
+    with zipfile.ZipFile(sample_docx) as archive:
+        names_after = archive.namelist()
+
+    assert names_after[: len(names_before)] == names_before
+    assert names_after[len(names_before) :] == [
+        "word/footnotes.xml",
+        "word/_rels/document.xml.rels",
+    ]
+
+
+def test_parts_missing_file_is_rejected(tmp_path: Path) -> None:
+    missing = tmp_path / "does-not-exist.docx"
+    with pytest.raises(InvalidDocumentError):
+        atomic_write_parts(missing, {"word/document.xml": b"<edited/>"})
+
+
+def test_parts_oversized_file_is_rejected_before_any_temp_file_is_created(
+    sample_docx: Path,
+) -> None:
+    actual_size = sample_docx.stat().st_size
+    with pytest.raises(InvalidDocumentError):
+        atomic_write_parts(
+            sample_docx, {"word/document.xml": b"<edited/>"}, max_size_bytes=actual_size - 1
+        )
+
+    leftover = [p for p in sample_docx.parent.iterdir() if p.name.startswith(".docx-mcp-")]
+    assert leftover == []
+
+
+def test_parts_simulated_crash_before_replace_leaves_original_byte_for_byte_intact(
+    sample_docx: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original_bytes = sample_docx.read_bytes()
+
+    def _boom(_src: str, _dst: str) -> None:
+        raise OSError("simulated crash")
+
+    monkeypatch.setattr(ooxml.os, "replace", _boom)
+
+    with pytest.raises(OSError, match="simulated crash"):
+        atomic_write_parts(
+            sample_docx,
+            {"word/document.xml": b"<edited/>", "word/footnotes.xml": b"<footnotes/>"},
+        )
 
     assert sample_docx.read_bytes() == original_bytes
     leftover = [p for p in sample_docx.parent.iterdir() if p.name.startswith(".docx-mcp-")]

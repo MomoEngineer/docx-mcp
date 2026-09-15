@@ -47,14 +47,27 @@ class FootnoteEntry:
     content: str | None
 
 
+def render_footnote_content(footnote: etree._Element) -> str:
+    """Render one declared `<w:footnote>` element's content as `get_footnotes` does.
+
+    Its `w:p` children are rendered with `paragraph_plain_text` (marker-free),
+    joined by `"\\n"` for a multi-paragraph footnote - deliberately not the
+    marker-inclusive `render_paragraph` `get_structure` uses for table-cell
+    text, since footnote content is a terminal leaf never itself navigated
+    into (spec §3). Exported so `docx_mcp.footnote_edit` can compute
+    `edit_footnote`'s `previous_content` from the exact same rendering
+    `get_footnotes` uses, rather than a second, independently-consistent
+    copy of it - the same reasoning
+    [ADR-0004](../../docs/adr/0004-phase-3-footnote-module-and-shared-anchor-resolution.md)
+    already established for anchor-finding (see also ADR-0007).
+    """
+    paragraphs = footnote.findall("w:p", namespaces=NSMAP)
+    return "\n".join(paragraph_plain_text(p) for p in paragraphs)
+
+
 def _content_by_id(footnotes_root: etree._Element) -> dict[str, str]:
     """Map every declared `w:footnote/@w:id` to its rendered content.
 
-    Content is each footnote's `w:p` children rendered with
-    `paragraph_plain_text` (marker-free), joined by `"\\n"` for a
-    multi-paragraph footnote - deliberately not the marker-inclusive
-    `render_paragraph` `get_structure` uses for table-cell text, since
-    footnote content is a terminal leaf never itself navigated into (spec §3).
     Word's own boilerplate separator/continuationSeparator footnotes are
     harmlessly included here too (they simply never match an anchor id, since
     Word never emits a body `w:footnoteReference` for them - spec §5).
@@ -64,8 +77,7 @@ def _content_by_id(footnotes_root: etree._Element) -> dict[str, str]:
         footnote_id = footnote.get(_W_ID)
         if footnote_id is None:
             continue
-        paragraphs = footnote.findall("w:p", namespaces=NSMAP)
-        content[footnote_id] = "\n".join(paragraph_plain_text(p) for p in paragraphs)
+        content[footnote_id] = render_footnote_content(footnote)
     return content
 
 

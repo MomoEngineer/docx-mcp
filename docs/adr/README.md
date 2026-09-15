@@ -46,9 +46,10 @@ An ADR is created for, among others:
 | [0004](0004-phase-3-footnote-module-and-shared-anchor-resolution.md) | Phase 3 Module Layout: `footnotes.py` and Shared Footnote-Anchor Resolution | Accepted |
 | [0005](0005-phase-4-text-edit-module-and-atomic-write.md) | Phase 4 Module Layout: `text_edit.py` and the Atomic-Write Contract | Accepted |
 | [0006](0006-phase-5-paragraph-edit-module-layout.md) | Phase 5 Module Layout: `paragraph_edit.py` and Style-Inheritance Rules for `insert_paragraph`/`delete_paragraph` | Accepted |
+| [0007](0007-phase-6-footnote-edit-module-layout-and-multi-part-atomic-write.md) | Phase 6 Module Layout: `footnote_edit.py`, Multi-Part Atomic Writes, and Anchor/Content Rules for `add_footnote`/`edit_footnote` | Accepted |
 
 ---
 
 ## 5. Open/planned ADRs
 
-- None currently open. The six ADRs required so far (OOXML library, dependency/lockfile strategy, Phase 2 module layout, Phase 3 module layout, Phase 4 module layout and atomic-write contract, Phase 5 module layout and style-inheritance rules) are decided above. Phase 6 will need its own module-layout ADR, per [ADR-0005](0005-phase-4-text-edit-module-and-atomic-write.md)'s follow-up note.
+- None currently open. The seven ADRs required so far (OOXML library, dependency/lockfile strategy, Phase 2 module layout, Phase 3 module layout, Phase 4 module layout and atomic-write contract, Phase 5 module layout and style-inheritance rules, Phase 6 module layout and multi-part atomic writes) are decided above. Phase 7 (security hardening) will need to extend its path-traversal/atomic-write test sweep to cover `ooxml.atomic_write_parts` alongside `atomic_write_part`, per [ADR-0007](0007-phase-6-footnote-edit-module-layout-and-multi-part-atomic-write.md)'s follow-up note.
