@@ -8,7 +8,7 @@ This document defines the requirements for documenting code and results. The goa
 
 - **Type hints are mandatory** for all public functions, tools, and return values. `python -m mypy src` must pass without errors.
 - **Docstrings are mandatory** for every publicly exposed MCP tool, and for public functions and classes.
-- A tool docstring contains at least: **purpose** (one sentence, doubles as the MCP tool description), **parameters**, **return value**, **errors/limitations**.
+- A tool docstring contains at least: **purpose** (one sentence, doubles as the MCP tool description), **parameters**, **return value**, **errors/limitations**, and **at least one concrete usage example**. The docstring — not the markdown spec — is what an LLM caller actually sees as the MCP tool description at call time, so it is the artifact these categories must hold on, not just the human-facing spec file; the example categories are the ones empirically shown to matter for agent tool-calling reliability (see [CONTRIBUTING.md §1](../CONTRIBUTING.md#1-guiding-principles), principle 5, citing Hasan et al., *"MCP Tool Descriptions Are Smelly"*, arXiv:2602.14878).
 - Style: consistent across the repo (Google style recommended).
 
 ---

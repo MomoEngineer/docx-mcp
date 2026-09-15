@@ -169,6 +169,22 @@ async def test_call_add_footnote_on_missing_file_is_a_tool_error(
 
 
 @pytest.mark.anyio
+async def test_call_add_footnote_on_corrupt_file_is_a_tool_error(
+    client: Client, allowed_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DOCX_MCP_ALLOWED_ROOTS", str(allowed_root))
+    corrupt = allowed_root / "corrupt.docx"
+    corrupt.write_bytes(b"not a zip file")
+
+    async with client:
+        result = await client.call_tool(
+            "add_footnote", {"path": str(corrupt), "paragraph_index": 0, "content": "x"}
+        )
+
+    assert result.is_error is True
+
+
+@pytest.mark.anyio
 async def test_call_add_footnote_out_of_range_paragraph_index_is_a_tool_error(
     client: Client, structured_docx: Path, monkeypatch: pytest.MonkeyPatch, allowed_root: Path
 ) -> None:

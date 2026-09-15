@@ -104,3 +104,25 @@ Reference: `tests/test_paragraph_edit.py` (functional, formatting-fidelity, and 
 - **Section-properties guard:** deleting a synthetic paragraph whose `w:pPr` contains a `w:sectPr` is rejected with a clear error, and nothing is written, **even when a correctly-matching `expected_text` is also given** (the guard is not bypassable via the staleness check); deleting an ordinary paragraph in the same document (not the one carrying `w:sectPr`) still succeeds.
 - **Error/edge:** `paragraph_index` negative; `paragraph_index` equal to and greater than the paragraph count; `expected_text` not matching (stale-index rejection); `expected_text` matching only case-differently is still rejected (exact-match only, no `case_sensitive` option); simulated crash mid-write (original file byte-for-byte intact); missing file; non-`.docx`/corrupt-ZIP input; missing `word/document.xml`; malformed `word/document.xml`; missing `<w:body>`; oversized file (plus a file at exactly the size limit, accepted); XXE-crafted `.docx` (entity never resolved; the delete still succeeds).
 - **Sequential edits:** an `insert_paragraph` immediately followed by a `delete_paragraph` of the very paragraph it just inserted (via the returned `paragraph_index`) leaves the document in its original state.
+
+## 9. Examples
+
+Against `tests/fixtures/paragraph_edits.docx`, removing paragraph 3 ("Second body paragraph."), with the staleness guard engaged:
+
+Request:
+
+```json
+{
+  "path": "/workspace/reports/paragraph_edits.docx",
+  "paragraph_index": 3,
+  "expected_text": "Second body paragraph."
+}
+```
+
+Response:
+
+```json
+{ "deleted_text": "Second body paragraph." }
+```
+
+Had the document changed since the caller last read paragraph 3 (e.g. an earlier `insert_paragraph`/`delete_paragraph` call shifted indices), a mismatching `expected_text` would fail the call with a clear "stale paragraph_index" error instead of deleting the wrong paragraph; omitting `expected_text` skips that check and deletes unconditionally.

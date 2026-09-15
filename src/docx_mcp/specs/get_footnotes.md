@@ -119,3 +119,25 @@ Reference: `tests/test_footnotes.py` (functional and error/edge at the `get_docu
 - **Functional:** against `tests/fixtures/footnotes.docx` (three footnotes: two anchored in the same paragraph, a third in a different paragraph) — correct `id`/`paragraph_index`/`content` for all three, correct ordering, the same-paragraph pair both present and not collapsed into one entry; against `tests/fixtures/minimal.docx` (its existing single footnote) for the simple baseline case; a synthetic multi-paragraph footnote (content joined by `"\n"`).
 - **Error/edge:** path outside allowed roots; oversized file rejected before parsing, file at exactly the size limit accepted; missing `word/footnotes.xml` with zero body anchors (`footnotes: []`); missing `word/footnotes.xml` with a dangling body anchor (`content: null`); malformed `word/footnotes.xml` (hard error); an anchor id with no matching declared footnote in an otherwise-valid `word/footnotes.xml` (`content: null` for that entry only); the Word boilerplate separator/continuationSeparator footnotes (`id="-1"`/`id="0"`) never appearing in the output; unicode and astral characters in footnote content; XXE-crafted `word/footnotes.xml` (external entity not resolved).
 - **Cross-tool consistency:** `get_footnotes`'s `id`/`paragraph_index` pairs match `get_structure`'s footnote-anchor index exactly, and every `id` matches a `"[^id]"` marker at the same paragraph in `read_document`'s output — checked against both `minimal.docx` and `footnotes.docx`.
+
+## 9. Examples
+
+Against `tests/fixtures/minimal.docx` (see `tests/test_get_footnotes_tool.py::test_call_get_footnotes_on_minimal_fixture_resolves_the_single_footnote`), with `DOCX_MCP_ALLOWED_ROOTS=/workspace`:
+
+Request:
+
+```json
+{ "path": "/workspace/reports/minimal.docx" }
+```
+
+Response:
+
+```json
+{
+  "footnotes": [
+    { "id": "1", "paragraph_index": 2, "content": " This is a footnote." }
+  ]
+}
+```
+
+`content` carries a leading space: that is the literal text Word itself writes into the footnote's text run right after the auto-number, preserved verbatim (`xml:space="preserve"`) rather than trimmed — a caller comparing `content` against `expected_content` in a following `edit_footnote` call must include it. Against `tests/fixtures/footnotes.docx`, which anchors two different footnote ids in the same paragraph, `footnotes` would instead contain `{"id": "1", "paragraph_index": 2, ...}` and `{"id": "2", "paragraph_index": 2, ...}` as two separate entries — never collapsed into one — plus a third, `{"id": "3", "paragraph_index": 4, ...}`, in a different paragraph.

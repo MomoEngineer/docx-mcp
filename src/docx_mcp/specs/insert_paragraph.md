@@ -112,3 +112,25 @@ Reference: `tests/test_paragraph_edit.py` (functional, formatting-fidelity, and 
 - **Custom-style boundary:** inserting plain body text after `structured.docx`'s `MySectionHeading` paragraph (a heading only via its `styles.xml` `basedOn` chain) copies its `w:pPr` verbatim, confirming this tool does **not** open `styles.xml` and therefore does not recognize it as a heading.
 - **Error/edge:** `after_paragraph_index` negative; `after_paragraph_index` equal to and greater than the paragraph count; `heading_level` of `0`, `10`, and `-1`; simulated crash mid-write (original file byte-for-byte intact); missing file; non-`.docx`/corrupt-ZIP input; missing `word/document.xml`; malformed `word/document.xml`; missing `<w:body>`; oversized file (plus a file at exactly the size limit, accepted); XXE-crafted `.docx` (entity never resolved; the insert still succeeds).
 - **Round-trip:** the returned `paragraph_index`, passed to a following `get_structure`/`read_document`/`find_text` call, addresses exactly the newly inserted paragraph.
+
+## 9. Examples
+
+Against `tests/fixtures/paragraph_edits.docx` (see [docs/testing.md §1](../../../docs/testing.md#1-test-scope-in-the-repo)), inserting a new body paragraph right after paragraph 1 ("First body paragraph.", which is centered and left-indented by 36pt):
+
+Request:
+
+```json
+{
+  "path": "/workspace/reports/paragraph_edits.docx",
+  "text": "Added by the agent.",
+  "after_paragraph_index": 1
+}
+```
+
+Response:
+
+```json
+{ "paragraph_index": 2 }
+```
+
+Because `heading_level` was omitted and the anchor (paragraph 1) is not itself a heading, the new paragraph inherits paragraph 1's `w:pPr` verbatim — it comes out centered and indented by 36pt too, not just sharing a style name. Inserting a heading instead — `{"path": "...", "text": "New Section", "after_paragraph_index": 0, "heading_level": 2}` — would ignore the anchor's formatting entirely and produce a paragraph whose `w:pPr` is exactly `<w:pStyle w:val="Heading2"/>`.

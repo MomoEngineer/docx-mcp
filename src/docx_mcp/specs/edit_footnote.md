@@ -110,3 +110,26 @@ Reference: `tests/test_footnote_edit.py` (functional and error/edge at the `edit
 - **Functional:** against `tests/fixtures/footnotes.docx`/`minimal.docx` — editing an existing footnote's content, both single-line and multi-line (paragraph count change, up and down), returns the correct `previous_content`, and the anchor/id/other footnotes are unaffected.
 - **Error/edge:** path outside allowed roots; `word/footnotes.xml` absent; malformed `word/footnotes.xml`; unknown `footnote_id`; `footnote_id` `"-1"`/`"0"` rejected; `expected_content` mismatch (stale, rejected before any write); `expected_content` match (accepted); empty `content`; simulated crash mid-write leaves the original file byte-for-byte intact; XXE-crafted `word/footnotes.xml`.
 - **Cross-tool consistency:** after `edit_footnote`, `get_footnotes` reports the new content at the same `id`/`paragraph_index`; `read_document`'s inline marker and `get_structure`'s footnote-anchor index for that id are unaffected by the content change.
+
+## 9. Examples
+
+Against `tests/fixtures/minimal.docx`, revising its one existing footnote (id `"1"`, current content `" This is a footnote."` — note the leading space, see [specs/get_footnotes.md §9](get_footnotes.md#9-examples)), with the staleness guard engaged:
+
+Request:
+
+```json
+{
+  "path": "/workspace/reports/minimal.docx",
+  "footnote_id": "1",
+  "content": "This is a revised footnote, with a source cited.",
+  "expected_content": " This is a footnote."
+}
+```
+
+Response:
+
+```json
+{ "previous_content": " This is a footnote." }
+```
+
+The footnote's anchor in `word/document.xml` (the `[^1]` marker at paragraph 2) and its `@w:id` are untouched — only `word/footnotes.xml`'s content changes. A mismatching `expected_content` (e.g. because another call already edited this footnote) fails with a clear "stale footnote_id" error instead of overwriting; omitting `expected_content` skips that check.

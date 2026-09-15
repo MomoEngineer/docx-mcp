@@ -132,3 +132,29 @@ Reference: `tests/test_text_edit.py` (functional and error/edge at the `find_tex
 - **Contract:** tool discoverable via `list_tools`; name, description, input schema, output schema, and version (`_meta`) match this spec.
 - **Functional:** against `tests/fixtures/run_split.docx` (new, Phase 4) — an exact match split across two runs with different formatting; a match entirely within one run; a match spanning a `w:tab`; case-insensitive matching that preserves original casing in `matched_text`; three non-overlapping matches within one paragraph with correct offsets; a fourth match in a different paragraph; no match found (`matches: []`). A synthetic per-test document (following `tests/test_document.py`'s convention) covers: a match immediately adjacent to a footnote reference on both sides (reference itself contributes no offset and never appears in `paragraph_text`); non-overlapping-match semantics (`"aa"` in `"aaaa"` finds two matches, not three overlapping ones); a length-changing case fold (Turkish dotted capital İ) earlier in a paragraph not desynchronizing a later match's offsets; each of several differently-cased occurrences of the same word keeping its own original casing in `matched_text` under `case_sensitive=False`.
 - **Error/edge:** path outside allowed roots; empty `search_text`; missing file; non-`.docx`/corrupt-ZIP input; missing `word/document.xml`; malformed `word/document.xml`; missing `<w:body>`; oversized file (plus a file at exactly the size limit, accepted); XXE-crafted `.docx` (external entity not resolved, no leaked content).
+
+## 9. Examples
+
+Against `tests/fixtures/run_split.docx` (see `tests/test_find_text_tool.py`), where paragraph 0's text "Please receive this message." has "receive" split across two differently-formatted `w:r` runs (bold "rec" + non-bold "eive"), with `DOCX_MCP_ALLOWED_ROOTS=/workspace`:
+
+Request:
+
+```json
+{ "path": "/workspace/reports/run_split.docx", "search_text": "receive" }
+```
+
+Response:
+
+```json
+{
+  "matches": [
+    {
+      "location": { "paragraph_index": 0, "start_offset": 7, "end_offset": 14 },
+      "matched_text": "receive",
+      "paragraph_text": "Please receive this message."
+    }
+  ]
+}
+```
+
+`location` can be passed straight through as `replace_text`'s `location` argument — see [specs/replace_text.md §9](replace_text.md#9-examples), which replaces exactly this match.

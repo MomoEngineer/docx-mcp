@@ -137,3 +137,28 @@ Reference: `tests/test_text_edit.py` (functional, formatting-fidelity, and error
 - **Sequential edits:** three successive `replace_text_in_document` calls against the same file, each re-opening and re-writing it, all apply correctly and leave a document every later call and every read tool can still parse.
 - **Footnote survival:** editing text immediately before a footnote reference (`tests/fixtures/minimal.docx`) and, separately, text immediately after one (a synthetic document, since `minimal.docx`'s anchor has no trailing text) both leave the reference untouched; re-running `get_document_footnotes` against the edited file resolves the anchor identically to before the edit.
 - **Error/edge:** out-of-range `paragraph_index` (including negative); out-of-range offsets (including `start_offset >= end_offset`); stale location (obtained, then invalidated by an intervening replace, then reused; separately confirmed to honor `case_sensitive` in both directions); zero matches in global mode; empty `search_text`; a synthetic run-container-boundary-spanning match (rejected, nothing written); simulated crash mid-write (original file byte-for-byte intact, proven both at the shared `atomic_write_part` level and directly at the `replace_text_in_document` level); missing file; non-`.docx`/corrupt-ZIP input; missing `word/document.xml`; malformed `word/document.xml`; missing `<w:body>`; oversized file (plus a file at exactly the size limit, accepted); XXE-crafted `.docx` (entity never resolved; the edit still succeeds and no secret content leaks into the written bytes).
+
+## 9. Examples
+
+**Location mode**, against `tests/fixtures/run_split.docx`, replacing exactly the match `find_text` would return for `"receive"` at paragraph 0 (see [specs/find_text.md §9](find_text.md#9-examples)):
+
+Request:
+
+```json
+{
+  "path": "/workspace/reports/run_split.docx",
+  "search_text": "receive",
+  "replacement_text": "REPLIED",
+  "location": { "paragraph_index": 0, "start_offset": 7, "end_offset": 14 }
+}
+```
+
+Response:
+
+```json
+{ "replacements_made": 1 }
+```
+
+The paragraph now reads "Please REPLIED this message."; the boundary runs' original bold/non-bold formatting is preserved on their unmatched prefix/suffix text, and the new run inherits the leftmost matched run's formatting (bold).
+
+**Global mode** (`location` omitted), same file: `{"path": "/workspace/reports/run_split.docx", "search_text": "test", "replacement_text": "exam"}` replaces all 4 occurrences of `"test"` across two different paragraphs and returns `{"replacements_made": 4}` (see `tests/test_replace_text_tool.py::test_call_replace_text_globally`).

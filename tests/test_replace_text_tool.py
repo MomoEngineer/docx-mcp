@@ -183,6 +183,23 @@ async def test_call_replace_text_on_missing_file_is_a_tool_error(
 
 
 @pytest.mark.anyio
+async def test_call_replace_text_on_corrupt_file_is_a_tool_error(
+    client: Client, allowed_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DOCX_MCP_ALLOWED_ROOTS", str(allowed_root))
+    corrupt = allowed_root / "corrupt.docx"
+    corrupt.write_bytes(b"not a zip file")
+
+    async with client:
+        result = await client.call_tool(
+            "replace_text",
+            {"path": str(corrupt), "search_text": "a", "replacement_text": "b"},
+        )
+
+    assert result.is_error is True
+
+
+@pytest.mark.anyio
 async def test_call_replace_text_empty_search_text_is_a_tool_error(
     client: Client, run_split_docx: Path, monkeypatch: pytest.MonkeyPatch, allowed_root: Path
 ) -> None:

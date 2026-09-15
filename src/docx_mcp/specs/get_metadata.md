@@ -111,3 +111,27 @@ Reference: `tests/test_metadata.py` (functional and error/edge at the `get_docum
 - **Contract:** tool discoverable via `list_tools`; name, description, input schema, output schema, and version (`_meta`) match this spec.
 - **Functional:** against `tests/fixtures/structured.docx` (deterministic title/author/created/modified core properties set at fixture-generation time) for metadata; word count checked against both `structured.docx` (includes table-cell text) and `minimal.docx` (plain-paragraph baseline, including the run-split-safe tokenization rule and, incidentally, python-docx's own bundled-template author/date defaults when a fixture never explicitly sets them).
 - **Error/edge:** path outside allowed roots; oversized file rejected before parsing, file at exactly the size limit accepted; missing `docProps/core.xml` (all four properties `null`, `word_count` still correct); malformed `docProps/core.xml` (degrades to `null`s, does not raise); empty `dc:title`/`dc:creator` elements (`null`, not `""`); `cp:lastModifiedBy` never surfacing as `author`; unicode and astral characters in `title`/`author` round-trip correctly; XML-predefined-entity escaping (`&amp;`/`&lt;`/`&gt;`) in property text decodes normally; word count excludes `read_document`'s own markers and does not split a word across runs; XXE-crafted `docProps/core.xml` (external entity not resolved).
+
+## 9. Examples
+
+Against `tests/fixtures/structured.docx` (deterministic core properties set at fixture-generation time — see `tests/fixtures/generate_fixtures.py::generate_structured_docx` and `tests/test_get_metadata_tool.py`), with `DOCX_MCP_ALLOWED_ROOTS=/workspace`:
+
+Request:
+
+```json
+{ "path": "/workspace/reports/structured.docx" }
+```
+
+Response:
+
+```json
+{
+  "title": "Structured Test Document",
+  "author": "Test Author",
+  "created": "2024-01-01T00:00:00Z",
+  "modified": "2024-06-15T12:30:00Z",
+  "word_count": 29
+}
+```
+
+`created`/`modified` are returned exactly as `docProps/core.xml` stores them (W3CDTF here), never reformatted; `word_count` is 19 tokens from the six body paragraphs plus 10 from the table's cell text (see [Output Schema](#3-output-schema)).

@@ -111,3 +111,25 @@ Reference: `tests/test_footnote_edit.py` (functional and error/edge at the `add_
 - **Functional:** against `tests/fixtures/structured.docx` (no footnotes yet — proves the from-scratch `word/footnotes.xml`/`[Content_Types].xml`/`.rels` creation path) and `tests/fixtures/footnotes.docx`/`minimal.docx` (footnotes already present — proves the append path and correct id allocation, e.g. `"4"` after ids `1`-`3`); multi-line `content` producing multiple footnote paragraphs, round-tripped through `get_footnotes`.
 - **Error/edge:** path outside allowed roots; out-of-range `paragraph_index`; malformed `word/footnotes.xml`; `[Content_Types].xml` missing entirely (hard error); `word/_rels/document.xml.rels` missing entirely (created fresh, synthetic archive); an existing but not-yet-referenced footnotes `Override`/`Relationship` (not duplicated); empty `content`; id allocation skips a non-numeric or out-of-order existing id without colliding; simulated crash mid-write leaves the original file byte-for-byte intact, in both the append-only and from-scratch cases; XXE-crafted `word/footnotes.xml` (external entity not resolved, reusing the shared hardened parser).
 - **Cross-tool consistency:** after `add_footnote`, `get_footnotes` resolves the new id at the expected `paragraph_index` with the expected `content`; `read_document`'s inline markers and `get_structure`'s footnote-anchor index agree with it too.
+
+## 9. Examples
+
+Against `tests/fixtures/structured.docx` (see `tests/test_add_footnote_tool.py::test_call_add_footnote_on_structured_fixture_creates_footnotes_xml`), which has zero footnotes yet — this exercises the from-scratch `word/footnotes.xml`/`[Content_Types].xml`/`.rels`-creation path:
+
+Request:
+
+```json
+{
+  "path": "/workspace/reports/structured.docx",
+  "paragraph_index": 0,
+  "content": "Source: internal Q1 report."
+}
+```
+
+Response:
+
+```json
+{ "footnote_id": "1" }
+```
+
+Against `tests/fixtures/footnotes.docx` instead (which already declares ids `1`–`3`), the same call with `paragraph_index: 5` would return `{"footnote_id": "4"}` — the append path, allocating the next free id rather than creating the package parts anew. The footnote reference is always appended at the end of paragraph 0's text, never at a caller-chosen character offset (see [Limitations](#5-limitations-non-goals)).

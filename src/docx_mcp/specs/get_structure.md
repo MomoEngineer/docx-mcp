@@ -174,4 +174,39 @@ Reference: `tests/test_structure.py` (functional and error/edge at the `get_docu
 
 - **Contract:** tool discoverable via `list_tools`; name, description, input schema, output schema, and version (`_meta`) match this spec.
 - **Functional:** against `tests/fixtures/structured.docx` (three heading levels including one custom-named style resolved via `w:basedOn`, a table with a horizontal merge, plain paragraphs) and `tests/fixtures/minimal.docx` (reused for the footnote-anchor-index assertion, since it already carries one footnote reference at a known paragraph).
+
+## 9. Examples
+
+Against `tests/fixtures/minimal.docx`, with `DOCX_MCP_ALLOWED_ROOTS=/workspace`:
+
+Request:
+
+```json
+{ "path": "/workspace/reports/minimal.docx" }
+```
+
+Response:
+
+```json
+{
+  "paragraphs": [
+    { "paragraph_index": 0, "text": "Introduction", "style_id": "Heading1", "heading_level": 1 },
+    { "paragraph_index": 1, "text": "This is the first paragraph of the document.", "style_id": null, "heading_level": null },
+    { "paragraph_index": 2, "text": "This paragraph has a footnote reference.", "style_id": null, "heading_level": null },
+    { "paragraph_index": 3, "text": "Background", "style_id": "Heading2", "heading_level": 2 },
+    { "paragraph_index": 4, "text": "", "style_id": null, "heading_level": null },
+    { "paragraph_index": 5, "text": "Final paragraph.", "style_id": null, "heading_level": null }
+  ],
+  "toc": [
+    { "paragraph_index": 0, "level": 1, "text": "Introduction" },
+    { "paragraph_index": 3, "level": 2, "text": "Background" }
+  ],
+  "tables": [],
+  "footnotes": [
+    { "id": "1", "paragraph_index": 2 }
+  ]
+}
+```
+
+`minimal.docx` has no table, so `tables` is empty here; against `tests/fixtures/structured.docx` (see `tests/test_get_structure_tool.py`), `tables[0].rows` would instead be `[["Header A", "Header B"], ["Value 1", "Value 2"], ["Merged Row"]]` — the third row has only one entry because its two cells are horizontally merged (`w:gridSpan`), not padded to match the other rows' length (see [Output Schema](#3-output-schema)).
 - **Error/edge:** path outside allowed roots; oversized file rejected before parsing, file at exactly the size limit accepted; missing `word/styles.xml` (falls back cleanly); malformed `word/styles.xml`; circular `w:basedOn` chain (does not hang/crash); a *deep but acyclic* `w:basedOn` chain (5 levels) resolves correctly, proving the 64-hop guard doesn't reject legitimate chains; a table row with a horizontally merged cell (shorter row, asserted explicitly, not treated as a bug); a vertically merged continuation cell (renders as `""`); multiple top-level tables indexed independently of the interleaved paragraphs; a table with zero rows; unicode and astral characters in headings and table cells; `outlineLvl` value `9` ("Body Text") resolves to `heading_level: null`; a paragraph with a `Heading1`-prefixed style that *also* carries a direct `outlineLvl w:val="9"` override resolves to `heading_level: null` (direct formatting wins over style, per step 1's precedence rule); an out-of-range (`-1`, `10`, `100`) or non-numeric (`abc`, empty) direct `outlineLvl` value falls through instead of producing a nonsensical `heading_level`, all the way to the `HeadingN` heuristic when a `pStyle` is present; a style's own malformed `outlineLvl` falls through to its `w:basedOn` ancestor instead of stopping the chain walk; XXE-crafted `styles.xml` (external entity not resolved).

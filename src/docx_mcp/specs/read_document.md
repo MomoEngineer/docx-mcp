@@ -108,3 +108,23 @@ Reference: `tests/test_read_document_tool.py` (contract, functional, error/edge 
 - **Contract:** tool is discoverable via `list_tools`; name, description, input schema, and version (`_meta`) match this spec.
 - **Functional:** against `tests/fixtures/minimal.docx` (plain paragraphs, two heading levels, one footnote reference) — exact expected `text` string, including marker placement.
 - **Error/edge:** path outside allowed roots; empty `DOCX_MCP_ALLOWED_ROOTS`; UNC network path (rejected fast, no network wait); missing file; non-`.docx`/corrupt-ZIP input; oversized file; XXE-crafted `.docx` (external entity not resolved, no local file content leaks into the result).
+
+## 9. Examples
+
+Against `tests/fixtures/minimal.docx` (two heading levels, a footnote reference, plain paragraphs — see `tests/test_read_document_tool.py::test_call_read_document_returns_expected_text`), with `DOCX_MCP_ALLOWED_ROOTS=/workspace`:
+
+Request:
+
+```json
+{ "path": "/workspace/reports/minimal.docx" }
+```
+
+Response:
+
+```json
+{
+  "text": "# Introduction\nThis is the first paragraph of the document.\nThis paragraph has a footnote reference.[^1]\n## Background\n\nFinal paragraph."
+}
+```
+
+Note the footnote reference rendered inline as `[^1]` (its content is not included — call `get_footnotes` for that), the `"## "` prefix for the level-2 `Background` heading, and the empty fourth line for the document's one blank paragraph.

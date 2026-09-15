@@ -64,3 +64,19 @@ Structure and meaning of the return value (fields, types, which are required). S
 
 - Reference to `tests/<module>/test_<tool_name>.py`.
 - Planned contract, functional, and error/edge-case tests (short list) — written from this spec, before the implementation (see [docs/testing.md](../docs/testing.md)).
+
+## 9. Examples
+
+At least one concrete, realistic request/response pair (see [CONTRIBUTING.md §1](../CONTRIBUTING.md#1-guiding-principles), principle 5, and [docs/documentation-standards.md §1](../docs/documentation-standards.md#1-docstrings-and-typing)) — not just the abstract schema from Section 2/3. Prefer grounding it in an actual `tests/fixtures/*.docx` file and a real assertion from this tool's test suite, so the example is provably accurate rather than illustrative-only. The same example (or a shortened form of it) belongs in the tool's docstring, since that is what a calling agent actually sees at call time — the spec's copy exists so it survives independently of the code.
+
+Request:
+
+```json
+{ "example_param": "..." }
+```
+
+Response:
+
+```json
+{ "field": "..." }
+```

@@ -85,9 +85,8 @@ def read_document(path: str) -> ReadDocumentResult:
     Headings (Word's built-in Heading 1-9 styles) are rendered as Markdown
     headings ("# ", "## ", ...); a footnote reference is rendered inline, at
     its exact position, as "[^N]" (its content is not included - use
-    get_footnotes once that tool exists). Table content, list numbering, and
-    endnotes are not extracted. See specs/read_document.md for the full
-    specification.
+    get_footnotes). Table content, list numbering, and endnotes are not
+    extracted. See specs/read_document.md for the full specification.
 
     Args:
         path: Filesystem path to a `.docx` file, absolute or relative. Must
@@ -101,6 +100,11 @@ def read_document(path: str) -> ReadDocumentResult:
     Raises:
         ToolError: If `path` escapes the allowed roots, the file does not
             exist, or the file is not a valid `.docx` document.
+
+    Example:
+        read_document(path="/workspace/reports/minimal.docx") returns
+        {"text": "# Introduction\\nThis is the first paragraph of the document.\\n"
+        "This paragraph has a footnote reference.[^1]\\n## Background\\n\\nFinal paragraph."}
     """
     config = load_config()
     try:
@@ -174,11 +178,11 @@ def get_structure(path: str) -> GetStructureResult:
     (via styles.xml's outlineLvl/basedOn chain, falling back to the HeadingN
     style-id heuristic); the table of contents is derived from those headings;
     every top-level table is rendered as rows of cell text; footnotes are
-    listed as a lightweight id+anchor index only (use get_footnotes, once that
-    tool exists, for resolved footnote content). See specs/get_structure.md
-    for the full specification, including the paragraph_index scope
-    (top-level body paragraphs only - not text inside table cells) and the
-    table-row-length caveat for merged cells.
+    listed as a lightweight id+anchor index only (use get_footnotes for
+    resolved footnote content). See specs/get_structure.md for the full
+    specification, including the paragraph_index scope (top-level body
+    paragraphs only - not text inside table cells) and the table-row-length
+    caveat for merged cells.
 
     Args:
         path: Filesystem path to a `.docx` file, absolute or relative. Must
@@ -194,6 +198,15 @@ def get_structure(path: str) -> GetStructureResult:
         ToolError: If `path` escapes the allowed roots, the file does not
             exist, the file is not a valid `.docx` document, or `word/styles.xml`
             is present but malformed.
+
+    Example:
+        get_structure(path="/workspace/reports/minimal.docx") returns paragraphs
+        for all six top-level paragraphs (e.g. paragraphs[0] =
+        {"paragraph_index": 0, "text": "Introduction", "style_id": "Heading1",
+        "heading_level": 1}), toc = [{"paragraph_index": 0, "level": 1,
+        "text": "Introduction"}, {"paragraph_index": 3, "level": 2, "text":
+        "Background"}], tables = [], and footnotes = [{"id": "1",
+        "paragraph_index": 2}].
     """
     config = load_config()
     try:
@@ -270,6 +283,12 @@ def get_metadata(path: str) -> GetMetadataResult:
     Raises:
         ToolError: If `path` escapes the allowed roots, the file does not
             exist, or the file is not a valid `.docx` document.
+
+    Example:
+        get_metadata(path="/workspace/reports/structured.docx") returns
+        {"title": "Structured Test Document", "author": "Test Author",
+        "created": "2024-01-01T00:00:00Z", "modified": "2024-06-15T12:30:00Z",
+        "word_count": 29}.
     """
     config = load_config()
     try:
@@ -343,6 +362,12 @@ def get_footnotes(path: str) -> GetFootnotesResult:
         ToolError: If `path` escapes the allowed roots, the file does not
             exist, the file is not a valid `.docx` document, or
             `word/footnotes.xml` is present but malformed.
+
+    Example:
+        get_footnotes(path="/workspace/reports/minimal.docx") returns
+        {"footnotes": [{"id": "1", "paragraph_index": 2, "content": " This is
+        a footnote."}]} - content keeps the leading space Word itself writes
+        after the auto-number, verbatim.
     """
     config = load_config()
     try:
@@ -418,6 +443,14 @@ def find_text(path: str, search_text: str, case_sensitive: bool = True) -> FindT
         ToolError: If `path` escapes the allowed roots, the file does not
             exist, the file is not a valid `.docx` document, or `search_text`
             is empty.
+
+    Example:
+        find_text(path="/workspace/reports/run_split.docx", search_text="receive")
+        returns {"matches": [{"location": {"paragraph_index": 0, "start_offset":
+        7, "end_offset": 14}, "matched_text": "receive", "paragraph_text":
+        "Please receive this message."}]} - "receive" was split across two
+        differently-formatted runs in the original document; location can be
+        passed straight through as replace_text's location argument.
     """
     config = load_config()
     try:
@@ -502,6 +535,16 @@ def replace_text(
             exist or is not a valid `.docx` document, `search_text` is
             empty, `location` is invalid or stale, no occurrences are found
             in global mode, or a match spans a run-container boundary.
+
+    Example:
+        replace_text(path="/workspace/reports/run_split.docx",
+        search_text="receive", replacement_text="REPLIED",
+        location={"paragraph_index": 0, "start_offset": 7, "end_offset": 14})
+        returns {"replacements_made": 1} and leaves "Please REPLIED this
+        message." in the document, with the surrounding runs' original
+        formatting untouched. Omitting location replaces every occurrence
+        instead - e.g. search_text="test", replacement_text="exam" (no
+        location) returns {"replacements_made": 4} against the same file.
     """
     config = load_config()
     try:
@@ -584,6 +627,14 @@ def insert_paragraph(
             exist or is not a valid `.docx` document, `after_paragraph_index`
             does not reference an existing paragraph, or `heading_level` is
             not in `1..9`.
+
+    Example:
+        insert_paragraph(path="/workspace/reports/paragraph_edits.docx",
+        text="Added by the agent.", after_paragraph_index=1) returns
+        {"paragraph_index": 2}. Since heading_level was omitted and paragraph
+        1 ("First body paragraph.") is not itself a heading, the new
+        paragraph inherits paragraph 1's centered, left-indented formatting
+        verbatim rather than just sharing its style name.
     """
     config = load_config()
     try:
@@ -646,6 +697,13 @@ def delete_paragraph(
             not reference an existing paragraph, `expected_text` is given
             and does not match, or the target paragraph carries the
             document's section properties.
+
+    Example:
+        delete_paragraph(path="/workspace/reports/paragraph_edits.docx",
+        paragraph_index=3, expected_text="Second body paragraph.") returns
+        {"deleted_text": "Second body paragraph."}. A mismatching
+        expected_text fails the call with a "stale paragraph_index" error
+        instead of deleting; omitting expected_text skips that check.
     """
     config = load_config()
     try:
@@ -707,6 +765,14 @@ def add_footnote(path: str, paragraph_index: int, content: str) -> AddFootnoteRe
             not reference an existing paragraph, `word/footnotes.xml` is
             malformed, or `word/footnotes.xml` is absent and
             `[Content_Types].xml` is also missing.
+
+    Example:
+        add_footnote(path="/workspace/reports/structured.docx",
+        paragraph_index=0, content="Source: internal Q1 report.") returns
+        {"footnote_id": "1"} - structured.docx has no footnotes yet, so this
+        also creates word/footnotes.xml and wires it into the package. Against
+        a document that already declares footnote ids 1-3, the same call
+        would instead return {"footnote_id": "4"}.
     """
     config = load_config()
     try:
@@ -767,6 +833,14 @@ def edit_footnote(
             `"-1"`/`"0"`, `word/footnotes.xml` is absent or malformed,
             `footnote_id` is not declared in it, or `expected_content` is
             given and does not match.
+
+    Example:
+        edit_footnote(path="/workspace/reports/minimal.docx", footnote_id="1",
+        content="This is a revised footnote, with a source cited.",
+        expected_content=" This is a footnote.") returns
+        {"previous_content": " This is a footnote."} - note the leading space,
+        which is part of the footnote's actual content (see get_footnotes).
+        The footnote's anchor and id are untouched; only its text changes.
     """
     config = load_config()
     try:
