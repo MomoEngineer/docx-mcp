@@ -339,6 +339,17 @@ def test_dotx_extension_with_valid_wordprocessingml_is_accepted(minimal_docx: Pa
     assert extract_text(dotx_path) == extract_text(minimal_docx)
 
 
+def test_docm_extension_with_valid_wordprocessingml_is_accepted(minimal_docx: Path) -> None:
+    """Validation is structural (spec §4): a `.docm` macro-enabled document
+    sharing the exact same `word/document.xml` shape as a `.docx` is
+    accepted - this tool never inspects the file extension or
+    `[Content_Types].xml`'s document-vs-macro-enabled declaration."""
+    docm_path = minimal_docx.with_suffix(".docm")
+    docm_path.write_bytes(minimal_docx.read_bytes())
+
+    assert extract_text(docm_path) == extract_text(minimal_docx)
+
+
 def test_document_xml_without_body_is_rejected(tmp_path: Path) -> None:
     path = tmp_path / "no-body.docx"
     xml = f'<w:document xmlns:w="{WORD_NS}"></w:document>'.encode()

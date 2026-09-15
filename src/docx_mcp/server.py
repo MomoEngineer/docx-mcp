@@ -4,7 +4,9 @@ See [docs/repository-structure.md §2](../../docs/repository-structure.md#2-conv
 `server.py` only wires a tool's arguments to its implementation module and
 translates that module's exceptions into `ToolError`; parsing, security, and
 configuration logic live in `docx_mcp.document`, `docx_mcp.structure`,
-`docx_mcp.metadata`, `docx_mcp.security`, and `docx_mcp.config`.
+`docx_mcp.metadata`, `docx_mcp.footnotes`, `docx_mcp.text_edit`,
+`docx_mcp.paragraph_edit`, `docx_mcp.footnote_edit`, `docx_mcp.security`, and
+`docx_mcp.config`.
 """
 
 from __future__ import annotations

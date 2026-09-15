@@ -67,8 +67,8 @@ The server operates on local file paths passed as tool arguments — the file mu
 | `find_text` | Read | Search for literal text; returns match locations (paragraph index and character offsets) for use with `replace_text`. |
 | `replace_text` | Write | Replace text at a specific location or globally, without corrupting surrounding formatting. |
 | `insert_paragraph` | Write | Insert a new paragraph (body text or heading) at a given position, inheriting the style of its context. |
-| `delete_paragraph` | Write | Remove a paragraph by its index/ID. |
-| `add_footnote` | Write | Attach a new footnote to a location in the text. |
+| `delete_paragraph` | Write | Remove a paragraph by its index, with an optional staleness check. |
+| `add_footnote` | Write | Attach a new footnote to a paragraph, appended at the end of its text. |
 | `edit_footnote` | Write | Update the content of an existing footnote. |
 
 This is the initial tool surface; it will evolve as real usage surfaces gaps — see [Roadmap.md](Roadmap.md).
