@@ -436,7 +436,9 @@ def find_text(path: str, search_text: str, case_sensitive: bool = True) -> FindT
         search_text: The literal text to search for. Must be non-empty.
         case_sensitive: `True` (default) for exact-case matching only;
             `False` for Unicode-aware case-insensitive matching (matched_text
-            still reflects the text's actual, original casing).
+            still reflects the text's actual, original casing; a character whose
+            lowercase form spans more than one code point, e.g. Turkish "İ", is
+            not matched case-insensitively - see specs/find_text.md §5).
 
     Returns:
         A `FindTextResult` carrying every match, in document order.
@@ -527,7 +529,9 @@ def replace_text(
         location: `None` (default) replaces every occurrence. Given (as
             returned by `find_text`), replaces exactly that one occurrence.
         case_sensitive: `True` (default) for exact-case matching/verification;
-            `False` for Unicode-aware case-insensitive matching.
+            `False` for Unicode-aware case-insensitive matching (a character
+            whose lowercase form spans more than one code point, e.g. Turkish
+            "İ", is not matched case-insensitively - see specs/replace_text.md §5).
 
     Returns:
         A `ReplaceTextResult` carrying the number of occurrences replaced.

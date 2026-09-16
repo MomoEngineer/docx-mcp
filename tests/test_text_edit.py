@@ -844,6 +844,25 @@ def test_find_case_insensitive_length_changing_casefold_does_not_desync_later_of
     assert matches[0].location == TextLocation(0, expected_start, expected_start + 4)
 
 
+def test_find_case_insensitive_does_not_match_a_length_changing_casefold_occurrence(
+    tmp_path: Path,
+) -> None:
+    """The flip side of the offset-safety test above, and the documented
+    trade-off (specs/find_text.md §5): case-insensitive search for
+    "istanbul" does not find "İstanbul" (Turkish dotted capital I, U+0130),
+    since `'İ'.lower()` is two characters and `_find_spans` only ever
+    compares fixed, `len(search_text)`-sized windows - never a whole-string
+    case-fold that could desync offsets. It still finds every occurrence
+    whose casefold is length-preserving."""
+    path = tmp_path / "turkish_i_miss.docx"
+    body = "<w:p><w:r><w:t>İstanbul ISTANBUL istanbul</w:t></w:r></w:p>"
+    _write_zip(path, {"word/document.xml": _document_xml(body)})
+
+    matches = find_text_matches(path, "istanbul", case_sensitive=False)
+
+    assert [m.matched_text for m in matches] == ["ISTANBUL", "istanbul"]
+
+
 def test_replace_astral_character_in_search_and_replacement_text(tmp_path: Path) -> None:
     path = tmp_path / "astral.docx"
     body = "<w:p><w:r><w:t>Great job \U0001f600 today</w:t></w:r></w:p>"

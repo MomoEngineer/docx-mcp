@@ -93,7 +93,7 @@ Phased implementation plan for docx-mcp. The plan is **iterative**: a thin, work
 
 **Scope:** tool specs and tests first; fixtures covering insertion after a heading, after a body paragraph, and at the end of the document; explicit scope note that a Word table-of-contents field is **not** recomputed by this tool (it requires a field refresh inside Word itself) — documented as a boundary, not fixed as a bug.
 
-**Definition of Done:** inserted paragraphs carry the correct style (`pStyle`) for their context; `delete_paragraph` removes a paragraph without leaving orphaned references; the TOC-non-recompute limitation is documented in the tool spec; tests green; no regression in Phases 1–4.
+**Definition of Done:** inserted paragraphs carry the correct style (`pStyle`) for their context; `delete_paragraph` removes a paragraph without leaving orphaned XML *elements* in `word/document.xml` itself (no dangling siblings, no malformed tree) — a footnote a deleted paragraph anchored is a deliberate, documented exception: its `<w:footnote>` entry is left in `word/footnotes.xml`, orphaned but harmless, per [ADR-0006 §Decision.5](docs/adr/0006-phase-5-paragraph-edit-module-layout.md#decision); the TOC-non-recompute limitation is documented in the tool spec; tests green; no regression in Phases 1–4.
 
 ---
 
