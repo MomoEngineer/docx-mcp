@@ -27,7 +27,8 @@ docx-mcp/
 │     ├─ 0004-*.md                # (from Phase 3) footnotes.py and shared anchor resolution
 │     ├─ 0005-*.md                # (from Phase 4) text_edit.py and the atomic-write contract
 │     ├─ 0006-*.md                # (from Phase 5) paragraph_edit.py and style-inheritance rules
-│     └─ 0007-*.md                # (from Phase 6) footnote_edit.py and multi-part atomic writes
+│     ├─ 0007-*.md                # (from Phase 6) footnote_edit.py and multi-part atomic writes
+│     └─ 0008-*.md                # (from Phase 9) scoped paragraph-range reads
 ├─ templates/
 │  ├─ tool-spec.md                # per-tool specification template
 │  └─ adr-template.md             # ADR template

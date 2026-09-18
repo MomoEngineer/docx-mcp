@@ -31,6 +31,7 @@ from docx_mcp.document import (
     paragraph_plain_text,
     paragraph_style_id,
     render_paragraph,
+    resolve_paragraph_range,
 )
 from docx_mcp.ooxml import (
     MAX_DOCX_SIZE_BYTES,
@@ -86,12 +87,18 @@ class FootnoteAnchor:
 
 @dataclass(frozen=True)
 class DocumentStructure:
-    """The full result of `get_document_structure` (see specs/get_structure.md §3)."""
+    """The full result of `get_document_structure` (see specs/get_structure.md §3).
+
+    `paragraphs`/`toc`/`footnotes` are scoped to the requested `start_paragraph`/
+    `end_paragraph` range, if any; `tables` and `total_paragraphs` are not (see
+    [ADR-0008](../../docs/adr/0008-scoped-paragraph-range-reads.md)).
+    """
 
     paragraphs: tuple[ParagraphInfo, ...]
     toc: tuple[TocEntry, ...]
     tables: tuple[TableInfo, ...]
     footnotes: tuple[FootnoteAnchor, ...]
+    total_paragraphs: int
 
 
 def _parse_outline_val(raw_val: str | None) -> int | None:
@@ -212,7 +219,11 @@ def _render_table(table: etree._Element) -> tuple[tuple[str, ...], ...]:
 
 
 def get_document_structure(
-    docx_path: Path, *, max_size_bytes: int = MAX_DOCX_SIZE_BYTES
+    docx_path: Path,
+    *,
+    max_size_bytes: int = MAX_DOCX_SIZE_BYTES,
+    start_paragraph: int | None = None,
+    end_paragraph: int | None = None,
 ) -> DocumentStructure:
     """Build a `.docx`'s structural outline: paragraphs, TOC, tables, footnote anchors.
 
@@ -223,16 +234,30 @@ def get_document_structure(
             perform any sandboxing itself.
         max_size_bytes: Reject the file if it is larger than this, before it
             is opened as a ZIP archive.
+        start_paragraph: `None` (default) for the whole document's start, or
+            a 0-based, inclusive start of a half-open range over
+            `paragraphs`/`toc`/`footnotes` (see
+            `docx_mcp.document.resolve_paragraph_range`,
+            [ADR-0008](../../docs/adr/0008-scoped-paragraph-range-reads.md)).
+            `tables` and `total_paragraphs` are never scoped by this.
+        end_paragraph: `None` (default) for the whole document's end, or an
+            exclusive end of the range. A value beyond the document's actual
+            paragraph count is clamped, not rejected.
 
     Returns:
         A `DocumentStructure` per
         [specs/get_structure.md §3](specs/get_structure.md#3-output-schema).
+        With no range given, `paragraphs`/`toc`/`footnotes` cover the whole
+        document, exactly as before this parameter existed.
 
     Raises:
         InvalidDocumentError: If the file does not exist, exceeds
             `max_size_bytes`, is not a valid ZIP archive, is missing or has a
             malformed `word/document.xml`, or has a `word/styles.xml` that is
             present but malformed.
+        ParagraphRangeError: If `start_paragraph` is negative, or
+            `end_paragraph` is given and less than the (given or defaulted)
+            `start_paragraph`.
     """
     with validate_and_open(docx_path, max_size_bytes=max_size_bytes) as archive:
         document_xml = read_part(archive, DOCUMENT_PART)
@@ -270,6 +295,13 @@ def get_document_structure(
         for table_index, table in enumerate(body.findall("w:tbl", namespaces=NSMAP))
     )
 
+    total_paragraphs = len(paragraphs)
+    start, end = resolve_paragraph_range(total_paragraphs, start_paragraph, end_paragraph)
+
     return DocumentStructure(
-        paragraphs=tuple(paragraphs), toc=tuple(toc), tables=tables, footnotes=footnotes
+        paragraphs=tuple(paragraphs[start:end]),
+        toc=tuple(entry for entry in toc if start <= entry.paragraph_index < end),
+        tables=tables,
+        footnotes=tuple(anchor for anchor in footnotes if start <= anchor.paragraph_index < end),
+        total_paragraphs=total_paragraphs,
     )

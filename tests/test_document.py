@@ -12,7 +12,12 @@ from pathlib import Path
 
 import pytest
 
-from docx_mcp.document import InvalidDocumentError, extract_text
+from docx_mcp.document import (
+    InvalidDocumentError,
+    ParagraphRangeError,
+    extract_text,
+    resolve_paragraph_range,
+)
 
 WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -273,6 +278,64 @@ def test_multiple_paragraphs_with_mixed_headings_footnotes_and_tabs(tmp_path: Pa
 
     expected = "# Section 1\nIntro text[^1]\n## Subsection\nKey:\tValue\n\nEnd[^2]"
     assert extract_text(path) == expected
+
+
+# --- Paragraph range (ADR-0008) -----------------------------------------------
+
+
+def test_paragraph_range_slices_the_rendered_text(minimal_docx: Path) -> None:
+    assert extract_text(minimal_docx, start_paragraph=3, end_paragraph=4) == "## Background"
+
+
+def test_paragraph_range_start_only_reads_to_the_end(minimal_docx: Path) -> None:
+    assert extract_text(minimal_docx, start_paragraph=5) == "Final paragraph."
+
+
+def test_paragraph_range_end_only_reads_from_the_start(minimal_docx: Path) -> None:
+    assert extract_text(minimal_docx, end_paragraph=1) == "# Introduction"
+
+
+def test_paragraph_range_omitted_reproduces_the_unranged_result(minimal_docx: Path) -> None:
+    assert extract_text(minimal_docx, start_paragraph=None, end_paragraph=None) == extract_text(
+        minimal_docx
+    )
+
+
+def test_paragraph_range_end_beyond_document_length_clamps(minimal_docx: Path) -> None:
+    assert extract_text(minimal_docx, start_paragraph=5, end_paragraph=999) == "Final paragraph."
+
+
+def test_paragraph_range_negative_start_raises(minimal_docx: Path) -> None:
+    with pytest.raises(ParagraphRangeError):
+        extract_text(minimal_docx, start_paragraph=-1)
+
+
+def test_paragraph_range_end_before_start_raises(minimal_docx: Path) -> None:
+    with pytest.raises(ParagraphRangeError):
+        extract_text(minimal_docx, start_paragraph=3, end_paragraph=1)
+
+
+def test_resolve_paragraph_range_defaults_to_the_whole_document() -> None:
+    assert resolve_paragraph_range(6, None, None) == (0, 6)
+
+
+def test_resolve_paragraph_range_clamps_bounds_beyond_the_total() -> None:
+    assert resolve_paragraph_range(6, 5, 999) == (5, 6)
+    assert resolve_paragraph_range(6, 1000, 2000) == (6, 6)
+
+
+def test_resolve_paragraph_range_allows_an_empty_range_at_a_valid_start() -> None:
+    assert resolve_paragraph_range(6, 3, 3) == (3, 3)
+
+
+def test_resolve_paragraph_range_rejects_negative_start() -> None:
+    with pytest.raises(ParagraphRangeError):
+        resolve_paragraph_range(6, -1, 5)
+
+
+def test_resolve_paragraph_range_rejects_end_before_start() -> None:
+    with pytest.raises(ParagraphRangeError):
+        resolve_paragraph_range(6, 3, 1)
 
 
 # --- Error / edge cases -------------------------------------------------------

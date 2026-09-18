@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from docx_mcp.document import InvalidDocumentError
+from docx_mcp.document import InvalidDocumentError, ParagraphRangeError
 from docx_mcp.structure import get_document_structure
 
 WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -99,6 +99,59 @@ def test_minimal_fixture_has_no_tables(minimal_docx: Path) -> None:
     result = get_document_structure(minimal_docx)
 
     assert result.tables == ()
+
+
+def test_minimal_fixture_total_paragraphs_unranged(minimal_docx: Path) -> None:
+    result = get_document_structure(minimal_docx)
+
+    assert result.total_paragraphs == 6
+    assert len(result.paragraphs) == 6
+
+
+# --- Paragraph range (ADR-0008) --------------------------------------------------
+
+
+def test_paragraph_range_scopes_paragraphs_toc_and_footnotes(minimal_docx: Path) -> None:
+    result = get_document_structure(minimal_docx, start_paragraph=3, end_paragraph=6)
+
+    assert [p.paragraph_index for p in result.paragraphs] == [3, 4, 5]
+    assert [t.paragraph_index for t in result.toc] == [3]
+    assert result.footnotes == ()  # the one footnote anchors at paragraph_index 2, excluded
+    assert result.total_paragraphs == 6
+
+
+def test_paragraph_range_does_not_scope_tables(structured_docx: Path) -> None:
+    full = get_document_structure(structured_docx)
+    ranged = get_document_structure(structured_docx, start_paragraph=0, end_paragraph=0)
+
+    assert ranged.paragraphs == ()
+    assert ranged.tables == full.tables
+    assert ranged.tables != ()
+
+
+def test_paragraph_range_empty_probe_still_reports_total_paragraphs(minimal_docx: Path) -> None:
+    result = get_document_structure(minimal_docx, start_paragraph=0, end_paragraph=0)
+
+    assert result.paragraphs == ()
+    assert result.toc == ()
+    assert result.footnotes == ()
+    assert result.total_paragraphs == 6
+
+
+def test_paragraph_range_end_beyond_document_length_clamps(minimal_docx: Path) -> None:
+    result = get_document_structure(minimal_docx, start_paragraph=5, end_paragraph=999)
+
+    assert [p.paragraph_index for p in result.paragraphs] == [5]
+
+
+def test_paragraph_range_negative_start_raises(minimal_docx: Path) -> None:
+    with pytest.raises(ParagraphRangeError):
+        get_document_structure(minimal_docx, start_paragraph=-1)
+
+
+def test_paragraph_range_end_before_start_raises(minimal_docx: Path) -> None:
+    with pytest.raises(ParagraphRangeError):
+        get_document_structure(minimal_docx, start_paragraph=3, end_paragraph=1)
 
 
 # --- Heading resolution: direct outlineLvl --------------------------------------

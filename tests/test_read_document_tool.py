@@ -57,6 +57,19 @@ async def test_read_document_input_schema_declares_required_path_string(client: 
 
 
 @pytest.mark.anyio
+async def test_read_document_input_schema_declares_optional_paragraph_range(
+    client: Client,
+) -> None:
+    async with client:
+        result = await client.list_tools()
+
+    tool = next(t for t in result.tools if t.name == "read_document")
+    schema = tool.input_schema
+    assert "start_paragraph" not in schema["required"]
+    assert "end_paragraph" not in schema["required"]
+
+
+@pytest.mark.anyio
 async def test_read_document_output_schema_declares_text_string(client: Client) -> None:
     async with client:
         result = await client.list_tools()
@@ -73,7 +86,7 @@ async def test_read_document_version_is_exposed_via_meta(client: Client) -> None
 
     tool = next(t for t in result.tools if t.name == "read_document")
     assert tool.meta is not None
-    assert tool.meta["docx_mcp.tool_version"] == READ_DOCUMENT_TOOL_VERSION == "1.0.0"
+    assert tool.meta["docx_mcp.tool_version"] == READ_DOCUMENT_TOOL_VERSION == "1.1.0"
 
 
 # --- Functional -----------------------------------------------------------------
@@ -99,7 +112,70 @@ async def test_call_read_document_returns_expected_text(
     )
 
 
+@pytest.mark.anyio
+async def test_call_read_document_with_paragraph_range_returns_only_that_slice(
+    client: Client, minimal_docx: Path, monkeypatch: pytest.MonkeyPatch, allowed_root: Path
+) -> None:
+    """ADR-0008: half-open `[start_paragraph, end_paragraph)`, same indexing as get_structure."""
+    monkeypatch.setenv("DOCX_MCP_ALLOWED_ROOTS", str(allowed_root))
+
+    async with client:
+        result = await client.call_tool(
+            "read_document",
+            {"path": str(minimal_docx), "start_paragraph": 3, "end_paragraph": 4},
+        )
+
+    assert result.is_error is False
+    assert result.structured_content["text"] == "## Background"
+
+
+@pytest.mark.anyio
+async def test_call_read_document_end_paragraph_beyond_document_length_clamps(
+    client: Client, minimal_docx: Path, monkeypatch: pytest.MonkeyPatch, allowed_root: Path
+) -> None:
+    """ADR-0008: a bound beyond the document's length clamps, Python-slice-like, not an error."""
+    monkeypatch.setenv("DOCX_MCP_ALLOWED_ROOTS", str(allowed_root))
+
+    async with client:
+        result = await client.call_tool(
+            "read_document",
+            {"path": str(minimal_docx), "start_paragraph": 5, "end_paragraph": 999},
+        )
+
+    assert result.is_error is False
+    assert result.structured_content["text"] == "Final paragraph."
+
+
 # --- Error / edge (surfaced as ToolError -> is_error=True) --------------------
+
+
+@pytest.mark.anyio
+async def test_call_read_document_negative_start_paragraph_is_a_tool_error(
+    client: Client, minimal_docx: Path, monkeypatch: pytest.MonkeyPatch, allowed_root: Path
+) -> None:
+    monkeypatch.setenv("DOCX_MCP_ALLOWED_ROOTS", str(allowed_root))
+
+    async with client:
+        result = await client.call_tool(
+            "read_document", {"path": str(minimal_docx), "start_paragraph": -1}
+        )
+
+    assert result.is_error is True
+
+
+@pytest.mark.anyio
+async def test_call_read_document_end_before_start_paragraph_is_a_tool_error(
+    client: Client, minimal_docx: Path, monkeypatch: pytest.MonkeyPatch, allowed_root: Path
+) -> None:
+    monkeypatch.setenv("DOCX_MCP_ALLOWED_ROOTS", str(allowed_root))
+
+    async with client:
+        result = await client.call_tool(
+            "read_document",
+            {"path": str(minimal_docx), "start_paragraph": 3, "end_paragraph": 1},
+        )
+
+    assert result.is_error is True
 
 
 @pytest.mark.anyio

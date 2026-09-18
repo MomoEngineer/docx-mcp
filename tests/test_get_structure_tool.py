@@ -64,7 +64,13 @@ async def test_get_structure_output_schema_declares_expected_top_level_fields(
 
     tool = next(t for t in result.tools if t.name == "get_structure")
     assert tool.output_schema is not None
-    assert set(tool.output_schema["required"]) == {"paragraphs", "toc", "tables", "footnotes"}
+    assert set(tool.output_schema["required"]) == {
+        "paragraphs",
+        "toc",
+        "tables",
+        "footnotes",
+        "total_paragraphs",
+    }
 
 
 @pytest.mark.anyio
@@ -74,7 +80,7 @@ async def test_get_structure_version_is_exposed_via_meta(client: Client) -> None
 
     tool = next(t for t in result.tools if t.name == "get_structure")
     assert tool.meta is not None
-    assert tool.meta["docx_mcp.tool_version"] == GET_STRUCTURE_TOOL_VERSION == "1.0.0"
+    assert tool.meta["docx_mcp.tool_version"] == GET_STRUCTURE_TOOL_VERSION == "1.1.0"
 
 
 # --- Functional -----------------------------------------------------------------
@@ -115,7 +121,126 @@ async def test_call_get_structure_on_minimal_fixture_finds_the_footnote_anchor(
     assert result.structured_content["footnotes"] == [{"id": "1", "paragraph_index": 2}]
 
 
+@pytest.mark.anyio
+async def test_call_get_structure_reports_total_paragraphs_unranged(
+    client: Client, minimal_docx: Path, monkeypatch: pytest.MonkeyPatch, allowed_root: Path
+) -> None:
+    monkeypatch.setenv("DOCX_MCP_ALLOWED_ROOTS", str(allowed_root))
+
+    async with client:
+        result = await client.call_tool("get_structure", {"path": str(minimal_docx)})
+
+    assert result.structured_content["total_paragraphs"] == 6
+    assert len(result.structured_content["paragraphs"]) == 6
+
+
+@pytest.mark.anyio
+async def test_call_get_structure_with_paragraph_range_scopes_paragraphs_toc_and_footnotes(
+    client: Client, minimal_docx: Path, monkeypatch: pytest.MonkeyPatch, allowed_root: Path
+) -> None:
+    """ADR-0008: paragraphs/toc/footnotes are scoped to the range; total_paragraphs is not."""
+    monkeypatch.setenv("DOCX_MCP_ALLOWED_ROOTS", str(allowed_root))
+
+    async with client:
+        result = await client.call_tool(
+            "get_structure",
+            {"path": str(minimal_docx), "start_paragraph": 3, "end_paragraph": 6},
+        )
+
+    content = result.structured_content
+    assert [p["paragraph_index"] for p in content["paragraphs"]] == [3, 4, 5]
+    assert [t["paragraph_index"] for t in content["toc"]] == [3]
+    assert content["footnotes"] == []  # the one footnote anchors at paragraph_index 2, excluded
+    assert content["total_paragraphs"] == 6
+
+
+@pytest.mark.anyio
+async def test_call_get_structure_range_does_not_scope_tables(
+    client: Client, structured_docx: Path, monkeypatch: pytest.MonkeyPatch, allowed_root: Path
+) -> None:
+    """specs/get_structure.md §5: `tables` is never scoped by start_paragraph/end_paragraph."""
+    monkeypatch.setenv("DOCX_MCP_ALLOWED_ROOTS", str(allowed_root))
+
+    async with client:
+        full = await client.call_tool("get_structure", {"path": str(structured_docx)})
+        ranged = await client.call_tool(
+            "get_structure",
+            {"path": str(structured_docx), "start_paragraph": 0, "end_paragraph": 0},
+        )
+
+    assert ranged.structured_content["paragraphs"] == []
+    assert ranged.structured_content["tables"] == full.structured_content["tables"]
+    assert ranged.structured_content["tables"] != []
+
+
+@pytest.mark.anyio
+async def test_call_get_structure_empty_probe_range_returns_total_paragraphs_cheaply(
+    client: Client, minimal_docx: Path, monkeypatch: pytest.MonkeyPatch, allowed_root: Path
+) -> None:
+    """ADR-0008 point 5: `start_paragraph=0, end_paragraph=0` still reports total_paragraphs."""
+    monkeypatch.setenv("DOCX_MCP_ALLOWED_ROOTS", str(allowed_root))
+
+    async with client:
+        result = await client.call_tool(
+            "get_structure",
+            {"path": str(minimal_docx), "start_paragraph": 0, "end_paragraph": 0},
+        )
+
+    assert result.structured_content == {
+        "paragraphs": [],
+        "toc": [],
+        "tables": [],
+        "footnotes": [],
+        "total_paragraphs": 6,
+    }
+
+
+@pytest.mark.anyio
+async def test_call_get_structure_end_paragraph_beyond_document_length_clamps(
+    client: Client, minimal_docx: Path, monkeypatch: pytest.MonkeyPatch, allowed_root: Path
+) -> None:
+    monkeypatch.setenv("DOCX_MCP_ALLOWED_ROOTS", str(allowed_root))
+
+    async with client:
+        result = await client.call_tool(
+            "get_structure",
+            {"path": str(minimal_docx), "start_paragraph": 5, "end_paragraph": 999},
+        )
+
+    assert result.is_error is False
+    assert [p["paragraph_index"] for p in result.structured_content["paragraphs"]] == [5]
+
+
 # --- Error / edge (surfaced as ToolError -> is_error=True) --------------------
+
+
+@pytest.mark.anyio
+async def test_call_get_structure_negative_start_paragraph_is_a_tool_error(
+    client: Client, minimal_docx: Path, monkeypatch: pytest.MonkeyPatch, allowed_root: Path
+) -> None:
+    monkeypatch.setenv("DOCX_MCP_ALLOWED_ROOTS", str(allowed_root))
+
+    async with client:
+        result = await client.call_tool(
+            "get_structure", {"path": str(minimal_docx), "start_paragraph": -1}
+        )
+
+    assert result.is_error is True
+
+
+@pytest.mark.anyio
+async def test_call_get_structure_end_before_start_paragraph_is_a_tool_error(
+    client: Client, minimal_docx: Path, monkeypatch: pytest.MonkeyPatch, allowed_root: Path
+) -> None:
+    monkeypatch.setenv("DOCX_MCP_ALLOWED_ROOTS", str(allowed_root))
+
+    async with client:
+        result = await client.call_tool(
+            "get_structure",
+            {"path": str(minimal_docx), "start_paragraph": 3, "end_paragraph": 1},
+        )
+
+    assert result.is_error is True
 
 
 @pytest.mark.anyio

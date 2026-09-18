@@ -101,6 +101,59 @@ async def test_get_structure_example_matches_spec(
         ],
         "tables": [],
         "footnotes": [{"id": "1", "paragraph_index": 2}],
+        "total_paragraphs": 6,
+    }
+
+
+@pytest.mark.anyio
+async def test_read_document_ranged_example_matches_spec(
+    client: Client, minimal_docx: Path, monkeypatch: pytest.MonkeyPatch, allowed_root: Path
+) -> None:
+    """specs/read_document.md §9 - scoped-range example (ADR-0008)."""
+    monkeypatch.setenv("DOCX_MCP_ALLOWED_ROOTS", str(allowed_root))
+
+    async with client:
+        result = await client.call_tool(
+            "read_document",
+            {"path": str(minimal_docx), "start_paragraph": 3, "end_paragraph": 99},
+        )
+
+    assert result.structured_content == {"text": "## Background\n\nFinal paragraph."}
+
+
+@pytest.mark.anyio
+async def test_get_structure_ranged_example_matches_spec(
+    client: Client, minimal_docx: Path, monkeypatch: pytest.MonkeyPatch, allowed_root: Path
+) -> None:
+    """specs/get_structure.md §9 - scoped-range example (ADR-0008)."""
+    monkeypatch.setenv("DOCX_MCP_ALLOWED_ROOTS", str(allowed_root))
+
+    async with client:
+        result = await client.call_tool(
+            "get_structure",
+            {"path": str(minimal_docx), "start_paragraph": 3, "end_paragraph": 99},
+        )
+
+    assert result.structured_content == {
+        "paragraphs": [
+            {
+                "paragraph_index": 3,
+                "text": "Background",
+                "style_id": "Heading2",
+                "heading_level": 2,
+            },
+            {"paragraph_index": 4, "text": "", "style_id": None, "heading_level": None},
+            {
+                "paragraph_index": 5,
+                "text": "Final paragraph.",
+                "style_id": None,
+                "heading_level": None,
+            },
+        ],
+        "toc": [{"paragraph_index": 3, "level": 2, "text": "Background"}],
+        "tables": [],
+        "footnotes": [],
+        "total_paragraphs": 6,
     }
 
 

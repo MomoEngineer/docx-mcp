@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from docx_mcp import __version__
 from docx_mcp.config import ServerConfig, load_config
-from docx_mcp.document import InvalidDocumentError, extract_text
+from docx_mcp.document import InvalidDocumentError, ParagraphRangeError, extract_text
 from docx_mcp.footnote_edit import (
     FootnoteEditError,
     add_footnote_to_document,
@@ -35,14 +35,19 @@ from docx_mcp.structure import get_document_structure
 from docx_mcp.text_edit import TextEditError, find_text_matches, replace_text_in_document
 from docx_mcp.text_edit import TextLocation as _TextLocation
 
-READ_DOCUMENT_TOOL_VERSION = "1.0.0"
+READ_DOCUMENT_TOOL_VERSION = "1.1.0"
 """Semantic version of `read_document`, per
 [docs/documentation-standards.md §4.1](../../docs/documentation-standards.md#41-tool-versioning).
 Exposed via the tool's `_meta` field (the MCP protocol has no native tool
-version field) rather than folded into the description text."""
+version field) rather than folded into the description text. `1.1.0`:
+optional `start_paragraph`/`end_paragraph` (additive, see
+[ADR-0008](../../docs/adr/0008-scoped-paragraph-range-reads.md))."""
 
-GET_STRUCTURE_TOOL_VERSION = "1.0.0"
-"""Semantic version of `get_structure` (see `docs/documentation-standards.md` §4.1)."""
+GET_STRUCTURE_TOOL_VERSION = "1.1.0"
+"""Semantic version of `get_structure` (see `docs/documentation-standards.md` §4.1).
+`1.1.0`: optional `start_paragraph`/`end_paragraph` plus the new
+`total_paragraphs` output field (additive, see
+[ADR-0008](../../docs/adr/0008-scoped-paragraph-range-reads.md))."""
 
 GET_METADATA_TOOL_VERSION = "1.0.0"
 """Semantic version of `get_metadata` (see `docs/documentation-standards.md` §4.1)."""
@@ -81,8 +86,10 @@ class ReadDocumentResult(BaseModel):
     )
 
 
-def read_document(path: str) -> ReadDocumentResult:
-    """Read a .docx file and return its full body text, with heading and footnote markers inline.
+def read_document(
+    path: str, start_paragraph: int | None = None, end_paragraph: int | None = None
+) -> ReadDocumentResult:
+    """Read a .docx file and return its body text, with heading and footnote markers inline.
 
     Headings (Word's built-in Heading 1-9 styles) are rendered as Markdown
     headings ("# ", "## ", ...); a footnote reference is rendered inline, at
@@ -95,18 +102,33 @@ def read_document(path: str) -> ReadDocumentResult:
             resolve inside one of the roots configured via
             `DOCX_MCP_ALLOWED_ROOTS`; an empty/unset allow-list denies every
             path.
+        start_paragraph: 0-based, inclusive start of a half-open paragraph
+            range, same indexing as get_structure/find_text/replace_text.
+            `None` (default) means "from the start". Use this to check the
+            tail of a document that is growing over many edits without
+            re-reading it in full each time.
+        end_paragraph: 0-based, exclusive end of the range. `None` (default)
+            means "to the end". A value beyond the document's actual
+            paragraph count is clamped, not rejected - so a caller need not
+            already know the document's exact length to request its tail.
 
     Returns:
-        A `ReadDocumentResult` carrying the extracted text.
+        A `ReadDocumentResult` carrying the extracted text (the requested
+        slice, or the whole document if no range was given).
 
     Raises:
         ToolError: If `path` escapes the allowed roots, the file does not
-            exist, or the file is not a valid `.docx` document.
+            exist, the file is not a valid `.docx` document, `start_paragraph`
+            is negative, or `end_paragraph` is less than `start_paragraph`.
 
     Example:
         read_document(path="/workspace/reports/minimal.docx") returns
         {"text": "# Introduction\\nThis is the first paragraph of the document.\\n"
         "This paragraph has a footnote reference.[^1]\\n## Background\\n\\nFinal paragraph."}
+
+        read_document(path="/workspace/reports/minimal.docx", start_paragraph=3,
+        end_paragraph=99) returns {"text": "## Background\\n\\nFinal paragraph."} -
+        end_paragraph is clamped since the document has only 6 paragraphs.
     """
     config = load_config()
     try:
@@ -115,8 +137,8 @@ def read_document(path: str) -> ReadDocumentResult:
         raise ToolError(str(exc)) from exc
 
     try:
-        text = extract_text(safe_path)
-    except InvalidDocumentError as exc:
+        text = extract_text(safe_path, start_paragraph=start_paragraph, end_paragraph=end_paragraph)
+    except (InvalidDocumentError, ParagraphRangeError) as exc:
         raise ToolError(str(exc)) from exc
 
     return ReadDocumentResult(text=text)
@@ -171,9 +193,18 @@ class GetStructureResult(BaseModel):
     footnotes: list[FootnoteAnchorEntry] = Field(
         description="Footnote-anchor index (id + paragraph_index only, no resolved content)."
     )
+    total_paragraphs: int = Field(
+        description=(
+            "The document's true paragraph count, independent of start_paragraph/"
+            "end_paragraph - lets a caller tell whether it has reached the end of the "
+            "document without requesting an adjacent range and finding it empty."
+        )
+    )
 
 
-def get_structure(path: str) -> GetStructureResult:
+def get_structure(
+    path: str, start_paragraph: int | None = None, end_paragraph: int | None = None
+) -> GetStructureResult:
     """Return a .docx file's structural outline: paragraphs, TOC, tables, footnote anchors.
 
     Every top-level body paragraph is indexed with its resolved heading level
@@ -191,15 +222,26 @@ def get_structure(path: str) -> GetStructureResult:
             resolve inside one of the roots configured via
             `DOCX_MCP_ALLOWED_ROOTS`; an empty/unset allow-list denies every
             path.
+        start_paragraph: 0-based, inclusive start of a half-open range over
+            `paragraphs` (and, consistently, `toc`/`footnotes`); `tables` is
+            never scoped by this. `None` (default) means "from the start".
+            Use this to check the tail of a growing document cheaply, or an
+            empty probe range (start_paragraph=0, end_paragraph=0) to read
+            just `total_paragraphs`.
+        end_paragraph: 0-based, exclusive end of the range. `None` (default)
+            means "to the end". A value beyond total_paragraphs is clamped,
+            not rejected.
 
     Returns:
         A `GetStructureResult` carrying the paragraph index, table of
-        contents, tables, and footnote-anchor index.
+        contents, tables, footnote-anchor index, and the document's true
+        total paragraph count.
 
     Raises:
         ToolError: If `path` escapes the allowed roots, the file does not
-            exist, the file is not a valid `.docx` document, or `word/styles.xml`
-            is present but malformed.
+            exist, the file is not a valid `.docx` document, `word/styles.xml`
+            is present but malformed, `start_paragraph` is negative, or
+            `end_paragraph` is less than `start_paragraph`.
 
     Example:
         get_structure(path="/workspace/reports/minimal.docx") returns paragraphs
@@ -207,8 +249,12 @@ def get_structure(path: str) -> GetStructureResult:
         {"paragraph_index": 0, "text": "Introduction", "style_id": "Heading1",
         "heading_level": 1}), toc = [{"paragraph_index": 0, "level": 1,
         "text": "Introduction"}, {"paragraph_index": 3, "level": 2, "text":
-        "Background"}], tables = [], and footnotes = [{"id": "1",
-        "paragraph_index": 2}].
+        "Background"}], tables = [], footnotes = [{"id": "1",
+        "paragraph_index": 2}], and total_paragraphs = 6.
+
+        get_structure(path="/workspace/reports/minimal.docx", start_paragraph=3,
+        end_paragraph=99) returns paragraphs/toc/footnotes scoped to [3, 6) (end
+        clamped) while total_paragraphs still reports 6.
     """
     config = load_config()
     try:
@@ -217,8 +263,10 @@ def get_structure(path: str) -> GetStructureResult:
         raise ToolError(str(exc)) from exc
 
     try:
-        structure = get_document_structure(safe_path)
-    except InvalidDocumentError as exc:
+        structure = get_document_structure(
+            safe_path, start_paragraph=start_paragraph, end_paragraph=end_paragraph
+        )
+    except (InvalidDocumentError, ParagraphRangeError) as exc:
         raise ToolError(str(exc)) from exc
 
     return GetStructureResult(
@@ -243,6 +291,7 @@ def get_structure(path: str) -> GetStructureResult:
             FootnoteAnchorEntry(id=f.id, paragraph_index=f.paragraph_index)
             for f in structure.footnotes
         ],
+        total_paragraphs=structure.total_paragraphs,
     )
 
 

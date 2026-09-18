@@ -127,6 +127,16 @@ Phased implementation plan for docx-mcp. The plan is **iterative**: a thin, work
 
 ---
 
+## Phase 9 – Scoped Paragraph-Range Reads
+
+**Goal:** let `read_document` and `get_structure` return a caller-chosen `[start_paragraph, end_paragraph)` slice instead of always the whole document, so checking a growing document before the next edit costs tokens proportional to what changed, not to the document's total size — see [ADR-0008](docs/adr/0008-scoped-paragraph-range-reads.md).
+
+**Scope:** a shared range-resolution helper (`docx_mcp.document.resolve_paragraph_range`, Python-slice-like: out-of-range bounds clamp, only a negative or reversed range is rejected); both tools' specs and tests updated first; `get_structure` gains a `total_paragraphs` output field; `read_document`'s output schema is deliberately left unchanged (ADR-0008, point 3).
+
+**Definition of Done:** both tools accept `start_paragraph`/`end_paragraph`; omitting both reproduces every existing test's expected output byte-for-byte (no regression); `get_structure`'s `toc`/`footnotes` are scoped consistently with `paragraphs`, `tables` is documented as unscoped; a range whose `end_paragraph` exceeds the document's length returns the available tail instead of erroring; a negative `start_paragraph` or `end_paragraph < start_paragraph` is rejected with a clear error; tests green; `ruff`/`mypy` clean; both tool specs' Version bumped to `1.1.0`.
+
+---
+
 ## Deliberately excluded (for now)
 
 Table structure edits (rows/columns), image insertion or replacement, document theme/style changes, comments, tracked changes, and remote/HTTP transport are out of scope for this roadmap — see the README's [Out of scope](README.md#out-of-scope-for-now) section. Each would need its own phase, its own ADR, and its own case for why the added complexity is worth it; none is assumed as a foregone next step.

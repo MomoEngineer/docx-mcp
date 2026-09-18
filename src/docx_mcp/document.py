@@ -39,6 +39,7 @@ __all__ = [
     "MAX_DOCX_SIZE_BYTES",
     "InvalidDocumentError",
     "NSMAP",
+    "ParagraphRangeError",
     "WORD_NS",
     "extract_text",
     "find_footnote_anchors",
@@ -47,6 +48,7 @@ __all__ = [
     "paragraph_plain_text",
     "paragraph_style_id",
     "render_paragraph",
+    "resolve_paragraph_range",
 ]
 
 WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -138,6 +140,50 @@ def render_paragraph(paragraph: etree._Element) -> str:
     return text
 
 
+class ParagraphRangeError(Exception):
+    """Raised for an invalid `start_paragraph`/`end_paragraph` range.
+
+    See [specs/read_document.md §7](specs/read_document.md#7-error-behavior) and
+    [specs/get_structure.md §7](specs/get_structure.md#7-error-behavior).
+    """
+
+
+def resolve_paragraph_range(
+    total_paragraphs: int, start_paragraph: int | None, end_paragraph: int | None
+) -> tuple[int, int]:
+    """Resolve an optional half-open `[start_paragraph, end_paragraph)` range, Python-slice-like.
+
+    `None` means "from the start" (`start_paragraph`) or "to the end" (`end_paragraph`). A
+    bound beyond `total_paragraphs` is clamped, not rejected - the dominant use case is a
+    caller checking a *growing* document without already knowing its current exact length
+    (see [ADR-0008](../../docs/adr/0008-scoped-paragraph-range-reads.md)). Only a negative
+    `start_paragraph`, or an `end_paragraph` less than the (given or defaulted)
+    `start_paragraph`, is rejected - neither can reflect a legitimate range.
+
+    Args:
+        total_paragraphs: The document's actual paragraph count.
+        start_paragraph: `None` (default) for `0`, or an explicit 0-based start.
+        end_paragraph: `None` (default) for `total_paragraphs`, or an explicit,
+            exclusive end.
+
+    Returns:
+        `(resolved_start, resolved_end)`, both within `[0, total_paragraphs]`.
+
+    Raises:
+        ParagraphRangeError: If `start_paragraph` is negative, or `end_paragraph` is
+            given and less than the (given or defaulted) `start_paragraph`.
+    """
+    start = 0 if start_paragraph is None else start_paragraph
+    if start < 0:
+        raise ParagraphRangeError(f"start_paragraph must be >= 0, got {start_paragraph}")
+    end = total_paragraphs if end_paragraph is None else end_paragraph
+    if end < start:
+        raise ParagraphRangeError(
+            f"end_paragraph ({end_paragraph}) must be >= start_paragraph ({start})"
+        )
+    return min(start, total_paragraphs), min(end, total_paragraphs)
+
+
 def get_body(document_root: etree._Element, *, part_name: str = DOCUMENT_PART) -> etree._Element:
     """Return `word/document.xml`'s `<w:body>`, or raise if it is missing.
 
@@ -174,8 +220,14 @@ def find_footnote_anchors(body: etree._Element) -> tuple[tuple[str, int], ...]:
     return tuple(anchors)
 
 
-def extract_text(docx_path: Path, *, max_size_bytes: int = MAX_DOCX_SIZE_BYTES) -> str:
-    """Extract the full body text of a `.docx`, with heading and footnote markers inline.
+def extract_text(
+    docx_path: Path,
+    *,
+    max_size_bytes: int = MAX_DOCX_SIZE_BYTES,
+    start_paragraph: int | None = None,
+    end_paragraph: int | None = None,
+) -> str:
+    """Extract a `.docx`'s body text, with heading and footnote markers inline.
 
     Args:
         docx_path: Path to the `.docx` file. Callers must have already
@@ -185,15 +237,27 @@ def extract_text(docx_path: Path, *, max_size_bytes: int = MAX_DOCX_SIZE_BYTES) 
         max_size_bytes: Reject the file if it is larger than this, before it
             is opened as a ZIP archive. Defaults to `MAX_DOCX_SIZE_BYTES`;
             overridable for tests.
+        start_paragraph: `None` (default) for the whole document's start, or
+            a 0-based, inclusive start of a half-open paragraph range (see
+            `resolve_paragraph_range`,
+            [ADR-0008](../../docs/adr/0008-scoped-paragraph-range-reads.md)).
+        end_paragraph: `None` (default) for the whole document's end, or an
+            exclusive end of the range. A value beyond the document's actual
+            paragraph count is clamped, not rejected.
 
     Returns:
-        The document's paragraphs joined by `"\\n"`, in document order, per
+        The selected paragraphs joined by `"\\n"`, in document order, per
         [specs/read_document.md §3](specs/read_document.md#3-output-schema).
+        With no range given, this is the full document, exactly as before
+        this parameter existed.
 
     Raises:
         InvalidDocumentError: If the file does not exist, exceeds
             `max_size_bytes`, is not a valid ZIP archive, is missing
             `word/document.xml`, or that part is not well-formed XML.
+        ParagraphRangeError: If `start_paragraph` is negative, or
+            `end_paragraph` is given and less than the (given or defaulted)
+            `start_paragraph`.
     """
     with validate_and_open(docx_path, max_size_bytes=max_size_bytes) as archive:
         raw_xml = read_part(archive, DOCUMENT_PART)
@@ -202,4 +266,5 @@ def extract_text(docx_path: Path, *, max_size_bytes: int = MAX_DOCX_SIZE_BYTES) 
     body = get_body(root)
 
     paragraphs = body.findall("w:p", namespaces=NSMAP)
-    return "\n".join(render_paragraph(p) for p in paragraphs)
+    start, end = resolve_paragraph_range(len(paragraphs), start_paragraph, end_paragraph)
+    return "\n".join(render_paragraph(p) for p in paragraphs[start:end])
