@@ -64,6 +64,19 @@ def test_empty_allowed_roots_denies_every_path(allowed_root: Path) -> None:
         resolve_safe_path(str(target), ())
 
 
+def test_path_outside_every_root_error_names_the_configured_roots(
+    allowed_root: Path, outside_root: Path
+) -> None:
+    """A caller must be able to tell *why* a path was rejected without a
+    second round trip - see docs/security-model.md §2."""
+    outside_file = outside_root / "secret.docx"
+
+    with pytest.raises(PathAccessError) as exc_info:
+        resolve_safe_path(str(outside_file), (allowed_root,))
+
+    assert str(allowed_root.resolve()) in str(exc_info.value)
+
+
 def test_empty_path_is_rejected(allowed_root: Path) -> None:
     with pytest.raises(PathAccessError):
         resolve_safe_path("", (allowed_root,))

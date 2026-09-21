@@ -21,6 +21,7 @@ docx-mcp reads and writes files on the local filesystem on behalf of an autonomo
 - A UNC network path (`\\host\share\...`, or `//host/share/...`) is rejected immediately, by lexical inspection only, **before** the canonicalization step below ever runs — see the threat-model entry above.
 - Resolution **canonicalizes** the path (resolves `..` segments and symlinks) before comparing it against the allowed roots, so a symlink inside an allowed root cannot be used to escape it.
 - A path that does not resolve inside at least one allowed root is rejected **before any file is opened** — the tool must not attempt to read or write it first and check afterward.
+- The rejection error names the currently configured `DOCX_MCP_ALLOWED_ROOTS` roots (or states that none are configured), so the calling agent or the user reading the error can tell *why* the path was rejected without a second round trip. This is safe to disclose: the server is local-only, single-user `stdio` (see [CONTRIBUTING.md §1, item 6](../CONTRIBUTING.md#1-guiding-principles)), so the caller and the person who configured the allow-list are the same party — there is no confidentiality boundary between them for this server's own configuration.
 
 ## 3. Atomic-write contract
 

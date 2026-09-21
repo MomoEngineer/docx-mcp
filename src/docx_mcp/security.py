@@ -61,6 +61,12 @@ def resolve_safe_path(raw_path: str, allowed_roots: Sequence[Path]) -> Path:
             to open the file - and, for a UNC path, before any attempt to
             even canonicalize it - per
             [docs/security-model.md §2](../../docs/security-model.md#2-path-sandboxing-rules).
+            When the resolved path escapes every configured root, the
+            message names those roots (or states that none are configured)
+            so the caller can tell why without a second round trip - see
+            [docs/security-model.md §2](../../docs/security-model.md#2-path-sandboxing-rules)
+            for why that disclosure is safe for this local-only, single-user
+            server.
     """
     if not allowed_roots:
         raise PathAccessError("access denied: no allowed roots are configured")
@@ -80,4 +86,5 @@ def resolve_safe_path(raw_path: str, allowed_roots: Sequence[Path]) -> Path:
         if resolved == root or root in resolved.parents:
             return resolved
 
-    raise PathAccessError("path is outside the allowed roots")
+    configured = ", ".join(str(root) for root in allowed_roots)
+    raise PathAccessError(f"path is outside the allowed roots (configured: {configured})")
