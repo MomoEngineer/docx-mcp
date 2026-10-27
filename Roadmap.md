@@ -6,6 +6,25 @@ Phased implementation plan for docx-mcp. The plan is **iterative**: a thin, work
 
 ---
 
+## Status (as of 2026-10-27)
+
+Reconstructed from the commit history (last commit 2026-09-21), the source modules and the test files; the test suite was **not** run for this update (no `pytest` in the audit environment). The repo is a supporting tool and is not on the thesis critical path (`Zeitplan.md` does not schedule it); no further work is planned unless the thesis workflow needs a new tool.
+
+| Phase | Status | Evidence |
+| --- | --- | --- |
+| 0 – Repository Foundations | Done | README, CONTRIBUTING, `docs/` set, templates (commits 2026-09-14) |
+| 1 – `read_document` | Done | `document.py`, `test_read_document_tool.py`, `test_document.py` |
+| 2 – `get_structure`, `get_metadata` | Done | `structure.py`, `metadata.py`, matching tool tests |
+| 3 – `get_footnotes` | Done | `footnotes.py`, `test_get_footnotes_tool.py` |
+| 4 – `find_text`, `replace_text` | Done | `text_edit.py`, tool tests |
+| 5 – `insert_paragraph`, `delete_paragraph` | Done | `paragraph_edit.py`, tool tests |
+| 6 – `add_footnote`, `edit_footnote` | Done | `footnote_edit.py`, tool tests |
+| 7 – Security hardening | Done | `security.py`, `test_security.py`, `test_ooxml_atomic_write.py`; path-rejection messages extended 2026-09-21 |
+| 8 – QA & documentation pass | Not separately evidenced | documentation commits 2026-09-15/16; no QA-pass commit; to be confirmed with a clean run of `pytest`, `ruff`, `mypy` |
+| 9 – Scoped paragraph-range reads | Done | commit 2026-09-18 (ADR-0008) |
+
+---
+
 ## Guiding principles
 
 - **Formatting fidelity first:** edits manipulate the underlying OOXML directly; nothing an edit doesn't touch may change.
